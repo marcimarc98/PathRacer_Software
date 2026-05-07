@@ -25,9 +25,12 @@ set(MX_Application_Src
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/sysmem.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/syscalls.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/battery_monitor.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/rc_state.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/crsf_receiver.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/crsf_telemetry.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/drive_pwm.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/lights_control.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Core/Src/vehicle_control.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../startup_stm32f303x8.s
 )

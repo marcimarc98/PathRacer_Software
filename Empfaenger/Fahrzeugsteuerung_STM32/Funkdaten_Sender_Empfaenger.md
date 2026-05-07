@@ -1,34 +1,41 @@
 # Funkdaten Sender / Empfaenger
 
-Kurzbeschreibung des aktuellen Systems:
+## Uebersicht
 
-- Python liest Lenkrad und Pedale am PC aus
-- der ESP32-Sender baut daraus ein CRSF-RC-Frame
-- der STM32-Empfaenger dekodiert das CRSF-Frame
-- der STM32 erzeugt daraus Servo- und ESC-PWM fuer das Fahrzeug
+Aktueller Datenweg:
+
+- Die Windows-App `LenkradSenderApp` liest Lenkrad, Gas, Bremse und Buttons am PC.
+- Die App sendet ein festes Host-Paket per USB-Serial an den ESP32-Sender.
+- Der ESP32-Sender baut daraus ein CRSF-RC-Frame und gibt es an das ELRS-Sendermodul aus.
+- Der STM32 im Fahrzeug dekodiert das CRSF-RC-Frame und erzeugt Servo-, ESC-, Kamera- und Lichtsignale.
+- Der STM32 baut zusaetzlich ein CRSF-Telemetrie-Frame fuer den Rueckkanal.
+- Der ESP32-Sender liest diese Rueckdaten wieder ein und gibt einen kompakten Status an die Windows-App zurueck.
 
 ## Pin-Belegung STM32
 
 Board:
 
 - NUCLEO-F303K8
-- MCU: STM32F303K8T6
+- MCU: `STM32F303K8T6`
 
-Aktuell verwendete Pins:
+Aktiv verwendete Pins:
 
 | Funktion | STM32-Pin | Nucleo-Anschluss |
 |---|---|---|
-| CRSF Empfang RX | `PA10` | `D0`, `CN3 Pin 2` |
+| Akku-ADC | `PA0` | `A0`, `CN4 Pin 1` |
+| CRSF RX vom ELRS-Empfaenger | `PA10` | `D0`, `CN3 Pin 2` |
+| CRSF TX zum ELRS-Empfaenger | `PA9` | `D1`, `CN3 Pin 1` |
 | Servo PWM | `PA6` | `A5`, `CN4 Pin 7` |
 | ESC PWM | `PA7` | `A6`, `CN4 Pin 6` |
+| Kamera PWM | `PA15` | `D10`, `CN3 Pin 5` |
+| Hauptlicht | `PB4` | `D12`, `CN4 Pin 14` |
+| Bremslicht | `PB5` | `D11`, `CN4 Pin 13` |
 | SWDIO | `PA13` | SWD Debug |
 | SWCLK | `PA14` | SWD Debug |
-| MCO / OSC_IN | `PF0` | `D7`, `CN3 Pin 10` |
-| User LED LD3 | `PB3` | `D13`, `CN4 Pin 15` |
 
 ## Host-Paket PC -> ESP32
 
-Das Python-Programm sendet ein festes 11-Byte-Paket:
+Die App sendet ein festes 11-Byte-Paket:
 
 | Byte(s) | Inhalt | Typ |
 |---|---|---|
@@ -38,69 +45,40 @@ Das Python-Programm sendet ein festes 11-Byte-Paket:
 | 4-5 | Gas | `uint16`, little endian |
 | 6-7 | Bremse | `uint16`, little endian |
 | 8-9 | Buttons | `uint16`, little endian |
-| 10 | XOR Checksumme | `uint8` |
+| 10 | XOR-Checksumme | `uint8` |
 
-Format:
+Reihenfolge ist fest:
 
 ```text
-<BBhHHH + checksum
+Lenkung -> Gas -> Bremse -> Buttons
 ```
 
-## Eingelesene Lenkrad-Daten
+## Lenkrad- und Button-Daten
 
-Python liest:
+Feste Zuordnung in der App:
 
-- `Axis 0` = Lenkung
-- `Axis 1` = Bremse
-- `Axis 2` = Gas
-- `Button 0..12`
+- `Axis 0 / X` = Lenkung
+- `Axis 1 / Y` = Bremse
+- `Axis RZ` = Gas
+- `Button 0..12` = Host-Buttons
 
-Skalierung:
+Aktiv fuer die Fahrzeuglogik werden nur diese Buttons genutzt:
 
-- Lenkung: `-1.0 .. +1.0` -> `-1000 .. +1000`
-- Gas: `0.0 .. 1.0` -> `0 .. 1000`
-- Bremse: `0.0 .. 1.0` -> `0 .. 1000`
-- Buttons: als Bits in einem `uint16`
-
-## Button-Belegung am Lenkrad
-
-Originale Host-Buttons:
-
-| Host-Button | Funktion |
-|---|---|
-| 0 | Down Shift |
-| 1 | Up Shift |
-| 2 | Dreieck |
-| 3 | Kreis |
-| 4 | Viereck |
-| 5 | X |
-| 6 | Drehknopf nach Links |
-| 7 | Drehknopf nach Rechts |
-| 8 | R2 |
-| 9 | L2 |
-| 10 | L1 |
-| 11 | R1 |
-| 12 | PS Button |
-
-Aktiv genutzt werden im aktuellen Fahrzeugcode nur:
-
-| Receiver-Button | Quelle |
-|---|---|
-| 0 | Down Shift |
-| 1 | Up Shift |
-| 2 | R2 |
-| 3 | L2 |
-| 4 | L1 |
-| 5 | R1 |
-| 6 | PS Button |
+| Receiver-Button | Host-Button | Funktion |
+|---|---|---|
+| 0 | 0 | Down Shift |
+| 1 | 1 | Up Shift |
+| 2 | 8 | R2 |
+| 3 | 9 | L2 |
+| 4 | 10 | L1 |
+| 5 | 11 | R1 |
+| 6 | 12 | PS |
 
 Die Host-Buttons `2..7` werden aktuell nicht in die Fahrzeuglogik uebernommen.
 
 ## CRSF-Kanalbelegung
 
 Der ESP32-Sender erzeugt ein standardkonformes CRSF-RC-Frame mit 16 Kanaelen.
-
-Aktuelle Belegung:
 
 | CRSF-Kanal | Inhalt |
 |---|---|
@@ -113,49 +91,50 @@ Aktuelle Belegung:
 | CH7 / Index 6 | Receiver-Button 3 = L2 |
 | CH8 / Index 7 | Receiver-Button 4 = L1 |
 | CH9 / Index 8 | Receiver-Button 5 = R1 |
-| CH10 / Index 9 | Receiver-Button 6 = PS Button |
-| CH11 / Index 10 | unbenutzt |
-| CH12 / Index 11 | unbenutzt |
-| CH13 / Index 12 | unbenutzt |
-| CH14 / Index 13 | unbenutzt |
-| CH15 / Index 14 | unbenutzt |
-| CH16 / Index 15 | unbenutzt |
+| CH10 / Index 9 | Receiver-Button 6 = PS |
+| CH11..CH16 | unbenutzt |
 
-CRSF-Werte:
+Buttons werden digital uebertragen:
 
-- analog: CRSF-Min/Max-Bereich
-- digital:
-  - `false` -> CRSF Minimum
-  - `true` -> CRSF Maximum
+- `false` -> CRSF Minimum
+- `true` -> CRSF Maximum
 
 ## CRSF <-> us Mapping
 
-Lenkung, Gas und Bremse werden im Empfaenger in Pulsweiten umgerechnet:
+Im Empfaenger werden Lenkung, Gas und Bremse auf Pulsweiten umgerechnet:
 
 - CRSF Mitte `992` entspricht etwa `1500 us`
 - kleiner als Mitte = unter `1500 us`
 - groesser als Mitte = ueber `1500 us`
 
-Digitale Buttons werden im Empfaenger als gedrueckt erkannt, wenn der Kanalwert oberhalb der Mitte liegt.
+Die Buttons werden als gedrueckt erkannt, wenn der Kanalwert oberhalb der Mitte liegt.
 
-## Implementierte Funktionen im Fahrzeugcode
+## Implementierte Fahrzeugfunktionen
 
-Aktuell implementiert:
+Im aktuellen STM32-Stand sind implementiert:
 
-- CRSF-Empfang auf `USART1`
+- CRSF Voll-Duplex auf `USART1` mit `416666 8N1`
 - Speichern des kompletten RC-Zustands im RAM
-- PWM-Ausgabe fuer Servo und ESC auf `TIM3`
+- Servo-PWM auf `PA6`
+- ESC-PWM auf `PA7`
+- Kamera-PWM auf `PA15`
+- Hauptlichtausgang auf `PB4`
+- Bremslichtausgang auf `PB5`
+- Akku-Spannungsmessung per ADC auf `PA0`
 - Fahrstufen `R / N / D`
 - Sicherheits-Neutral ueber `PS`
-- Entsperren von `N` ueber `L1 + R1`
+- Freigabe von `N` ueber `L1 + R1`
 - Umschalten zwischen `D` und `R` ueber die Shift-Paddles
-- Bremse nur in `D`
-- Bremse in `R` komplett deaktiviert
-- Rueckwaerts-Geschwindigkeitslimit
+- Zeitfenster fuer die sichere Erkennung von `L1 + R1`
 - Fahrmodus `Normal / Sport`
-- progressive Gaskennlinie in `Normal`
-- lineare Gaskennlinie in `Sport`
-- progressive Lenk-Expo ohne Deadzone
+- in `Sport`: lineare Gas- und Lenkkennlinie
+- in `Normal`: progressive Gas- und progressive Lenkkennlinie
+- Rueckwaerts-Geschwindigkeitslimit
+- Kameraumschaltung mit `R2`
+- invertierte Lenkung bei aktiver Rueckfahrkamera
+- `R1` tippen: Hauptlicht ein/aus
+- `L1` tippen: Lichthupe
+- Bremslicht aktiv bei gedrueckter Bremse
 - Failsafe nach `500 ms`
 
 ## Bedienung
@@ -166,37 +145,78 @@ Startzustand:
 - `N` ist verriegelt
 - ESC bekommt Neutral
 
-Freigabe:
-
-- `L1 + R1` gleichzeitig druecken
-- danach ist `N` freigegeben
-
 Schalten:
 
+- `L1 + R1` innerhalb des Zeitfensters -> `N` freigeben
 - `Up Shift` -> `D`
 - `Down Shift` -> `R`
-- direktes Umschalten zwischen `D` und `R` ist moeglich
-
-Zurueck nach Neutral:
-
-- `L1 + R1` gleichzeitig druecken -> verriegeltes `N`
+- in `D` und `R` schalten die Paddles direkt zwischen den Fahrstufen
+- `L1 + R1` aus `D` oder `R` -> verriegeltes `N`
 - `PS` -> sofortiges Sicherheits-`N`
 
 Fahrmodi:
 
 - `L2` schaltet zwischen `Normal` und `Sport`
+- `Normal` = progressive Gas- und Lenkkennlinie
+- `Sport` = lineare Gas- und Lenkkennlinie
 
-Verhalten der Pedale:
+Kamera:
+
+- `R2` schaltet zwischen Front- und Rueckansicht
+- bei aktiver Rueckansicht wird die Lenkung invertiert
+
+Licht:
+
+- `R1` tippen -> Hauptlicht ein/aus
+- `L1` tippen -> Lichthupe
+- Bremse gedrueckt -> Bremslicht an
+
+Pedalverhalten:
 
 - in `N`: kein Antrieb
 - in `D`: Gas vorwaerts, Bremse bremst
-- in `R`: Gas rueckwaerts, Bremse wird ignoriert
+- in `R`: Gas rueckwaerts, Bremse wird fuer den ESC ignoriert
+
+## Rueckkanal
+
+Der STM32 baut zwei standardkonforme CRSF-Telemetrie-Frames:
+
+- `0x21 Flight Mode`
+- `0x08 Battery Sensor`
+
+Aktueller Textinhalt im `0x21 Flight Mode`-Frame:
+
+```text
+<Gear>|<Mode>|L<0/1>|C<0/1>
+```
+
+Beispiele:
+
+- `N|NORMAL|L0|C0`
+- `D|SPORT|L1|C0`
+- `R|NORMAL|L1|C1`
+
+Bedeutung:
+
+- `Gear` = `R`, `N`, `D`
+- `Mode` = `NORMAL` oder `SPORT`
+- `L` = Hauptlicht aus/ein
+- `C` = Front-/Rueckkamera
+
+Zusaetzlich sendet `0x08 Battery Sensor`:
+
+- Akku-Spannung
+- Akku-Restwert in Prozent
+
+Der ESP32-Sender liest diese Telemetrie wieder vom CRSF-Bus ein und sendet einen kompakten Status per USB-Serial an die Windows-App.
 
 ## Wichtige Stellschrauben im Code
 
-Datei:
+Dateien:
 
 - `Core/Src/vehicle_control.c`
+- `Core/Src/drive_pwm.c`
+- `Core/Src/lights_control.c`
 
 Wichtige Konstanten:
 
@@ -205,13 +225,20 @@ Wichtige Konstanten:
 - `STEERING_EXPO_PERCENT`
 - `GAS_ACTIVE_DEADBAND_US`
 - `BRAKE_ACTIVE_DEADBAND_US`
+- `CAMERA_PWM_FRONT_US`
+- `CAMERA_PWM_REAR_US`
+- `LIGHTS_COMBO_WINDOW_MS`
+- `LIGHTS_FLASH_DURATION_MS`
 
 ## Relevante Code-Dateien
 
-- `Schnittstellendoku_Sender/Lenkraddaten_einlesen_und_an_ESP_senden.py`
-- `Schnittstellendoku_Sender/Sendestation.ino`
+- `Software/Sendestation/LenkradSenderApp/Form1.cs`
+- `Software/Sendestation/LenkradSenderApp/SenderService.cs`
+- `Software/Sendestation/Sendestation.ino`
 - `Core/Src/app.c`
 - `Core/Src/crsf_receiver.c`
+- `Core/Src/crsf_telemetry.c`
 - `Core/Src/rc_state.c`
 - `Core/Src/vehicle_control.c`
 - `Core/Src/drive_pwm.c`
+- `Core/Src/lights_control.c`

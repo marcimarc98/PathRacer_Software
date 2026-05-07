@@ -97,10 +97,49 @@ public partial class Form1 : Form
         labelSteeringLiveValue.Text = telemetry.SteeringRaw.ToString();
         labelGasLiveValue.Text = telemetry.GasRaw.ToString();
         labelBrakeLiveValue.Text = telemetry.BrakeRaw.ToString();
+        UpdateVehicleStatus(_senderService.LastVehicleTelemetry);
 
         buttonStart.Enabled = !_senderService.IsRunning;
         buttonStop.Enabled = _senderService.IsRunning;
         comboPorts.Enabled = !_senderService.IsRunning;
+    }
+
+    private void UpdateVehicleStatus(SenderService.VehicleTelemetrySnapshot telemetry)
+    {
+        labelVehicleLinkValue.Text = telemetry.LinkActive ? "Aktiv" : "Inaktiv";
+
+        if (telemetry.LinkActive)
+        {
+            labelVehicleModeValue.Text = telemetry.SportMode ? "Sport" : "Normal";
+            labelVehicleCameraValue.Text = telemetry.CameraRearActive ? "Hinten" : "Vorne";
+            labelVehicleLightValue.Text = telemetry.MainLightOn ? "Ein" : "Aus";
+            labelVehicleBatteryValue.Text = telemetry.BatteryMv > 0
+                ? $"{telemetry.BatteryMv} mV / {telemetry.BatteryPercent} %"
+                : "--";
+            labelGearValue.Text = telemetry.Gear.ToString();
+            labelGearValue.ForeColor = telemetry.Gear switch
+            {
+                'R' => Color.Firebrick,
+                'N' => Color.ForestGreen,
+                'D' => Color.RoyalBlue,
+                _ => Color.DimGray,
+            };
+        }
+        else
+        {
+            labelVehicleModeValue.Text = "--";
+            labelVehicleCameraValue.Text = "--";
+            labelVehicleLightValue.Text = "--";
+            labelVehicleBatteryValue.Text = "--";
+            labelGearValue.Text = "-";
+            labelGearValue.ForeColor = Color.DimGray;
+        }
+
+        var debug = _senderService.LastDebugTelemetry;
+        labelVehicleDebugValue.Text =
+            $"RX {debug.RxBytes}   FRM {debug.Frames}   CRC {debug.CrcErrors}{Environment.NewLine}" +
+            $"FM {debug.FlightModeFrames}   BAT {debug.BatteryFrames}   DEV {debug.DeviceInfoFrames}   LAST 0x{debug.LastTypeHex}{Environment.NewLine}" +
+            $"VALID {(debug.Valid ? 1 : 0)}   GEAR {debug.Gear}   MV {debug.BatteryMv}   PCT {debug.BatteryPercent}";
     }
 
     private void ProbeWheel()

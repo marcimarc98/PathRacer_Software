@@ -2,14 +2,13 @@
 
 #define BUTTON_DOWN_SHIFT 0U
 #define BUTTON_UP_SHIFT   1U
+#define BUTTON_R2         2U
 #define BUTTON_L2         3U
-#define BUTTON_L1         4U
-#define BUTTON_R1         5U
 #define BUTTON_PS         6U
 
 #define PEDAL_MIN_US                   1000
 #define PEDAL_MAX_US                   2000
-#define ESC_NEUTRAL_US                 1500
+#define CONTROL_NEUTRAL_US             1500
 #define GAS_ACTIVE_DEADBAND_US         8
 #define BRAKE_ACTIVE_DEADBAND_US       25
 #define REVERSE_GAS_LIMIT_PERCENT      20U
@@ -19,16 +18,17 @@
 typedef struct
 {
   vehicle_gear_t gear;
+  vehicle_drive_mode_t drive_mode;
   bool neutral_locked;
+  bool camera_rear_active;
   bool sync_buttons_on_next_step;
   bool prev_down_shift;
   bool prev_up_shift;
   bool prev_mode_toggle;
-  bool prev_unlock_combo;
+  bool prev_camera_toggle;
   bool prev_safe_neutral;
   bool drive_brake_cycle_active;
   bool drive_brake_lockout;
-  bool sport_mode_active;
 } vehicle_control_state_t;
 
 static vehicle_control_state_t s_vehicle_control;
@@ -93,6 +93,11 @@ static bool button_rising_edge(bool current_value, bool* previous_value)
   return rising_edge;
 }
 
+static int mirror_around_neutral(int value_us)
+{
+  return clamp_us((CONTROL_NEUTRAL_US * 2) - value_us);
+}
+
 static uint16_t limit_reverse_amount(uint16_t gas_amount)
 {
   const uint16_t reverse_limit =
@@ -122,10 +127,10 @@ static uint16_t apply_normal_drive_curve(uint16_t gas_amount)
 static int apply_steering_expo(int steering_us)
 {
   const int clamped_steering_us = clamp_us(steering_us);
-  const int centered = clamped_steering_us - ESC_NEUTRAL_US;
+  const int centered = clamped_steering_us - CONTROL_NEUTRAL_US;
   const int sign = (centered < 0) ? -1 : 1;
   const uint32_t magnitude = (uint32_t)((centered < 0) ? -centered : centered);
-  const uint32_t full_scale = (uint32_t)(PEDAL_MAX_US - ESC_NEUTRAL_US);
+  const uint32_t full_scale = (uint32_t)(PEDAL_MAX_US - CONTROL_NEUTRAL_US);
   const uint32_t expo = STEERING_EXPO_PERCENT;
   const uint64_t linear_part = (uint64_t)magnitude * (uint64_t)(100U - expo);
   const uint64_t cubic_part =
@@ -139,8 +144,21 @@ static int apply_steering_expo(int steering_us)
     expo_magnitude = (uint64_t)full_scale;
   }
 
-  steering_output = ESC_NEUTRAL_US + (sign * (int)expo_magnitude);
+  steering_output = CONTROL_NEUTRAL_US + (sign * (int)expo_magnitude);
   return clamp_us(steering_output);
+}
+
+static int apply_steering_curve(int steering_us)
+{
+  int steering_output =
+      (s_vehicle_control.drive_mode == VEHICLE_DRIVE_MODE_SPORT) ? clamp_us(steering_us) : apply_steering_expo(steering_us);
+
+  if (s_vehicle_control.camera_rear_active)
+  {
+    steering_output = mirror_around_neutral(steering_output);
+  }
+
+  return steering_output;
 }
 
 static void reset_brake_interlocks(void)
@@ -167,10 +185,10 @@ static int mix_drive_esc_output(int gas_us, int brake_us)
     if ((!s_vehicle_control.drive_brake_lockout) || s_vehicle_control.drive_brake_cycle_active)
     {
       s_vehicle_control.drive_brake_cycle_active = true;
-      return ESC_NEUTRAL_US - (int)brake_amount;
+      return CONTROL_NEUTRAL_US - (int)brake_amount;
     }
 
-    return ESC_NEUTRAL_US;
+    return CONTROL_NEUTRAL_US;
   }
 
   if (s_vehicle_control.drive_brake_cycle_active)
@@ -183,15 +201,15 @@ static int mix_drive_esc_output(int gas_us, int brake_us)
   {
     s_vehicle_control.drive_brake_lockout = false;
 
-    if (!s_vehicle_control.sport_mode_active)
+    if (s_vehicle_control.drive_mode == VEHICLE_DRIVE_MODE_NORMAL)
     {
       gas_amount = apply_normal_drive_curve(gas_amount);
     }
 
-    return ESC_NEUTRAL_US + (int)gas_amount;
+    return CONTROL_NEUTRAL_US + (int)gas_amount;
   }
 
-  return ESC_NEUTRAL_US;
+  return CONTROL_NEUTRAL_US;
 }
 
 static int mix_reverse_esc_output(int gas_us, int brake_us)
@@ -202,10 +220,10 @@ static int mix_reverse_esc_output(int gas_us, int brake_us)
 
   if (limited_gas_amount > 0U)
   {
-    return ESC_NEUTRAL_US - (int)limited_gas_amount;
+    return CONTROL_NEUTRAL_US - (int)limited_gas_amount;
   }
 
-  return ESC_NEUTRAL_US;
+  return CONTROL_NEUTRAL_US;
 }
 
 static int mix_esc_output(vehicle_gear_t gear, int gas_us, int brake_us)
@@ -221,13 +239,12 @@ static int mix_esc_output(vehicle_gear_t gear, int gas_us, int brake_us)
   }
 
   reset_brake_interlocks();
-  return ESC_NEUTRAL_US;
+  return CONTROL_NEUTRAL_US;
 }
 
 static void update_transmission_state(
     bool down_shift_edge,
     bool up_shift_edge,
-    bool unlock_combo_edge,
     bool safe_neutral_edge)
 {
   if (safe_neutral_edge)
@@ -239,21 +256,10 @@ static void update_transmission_state(
   switch (s_transmission_state)
   {
     case TRANSMISSION_STATE_NEUTRAL_LOCKED:
-      if (unlock_combo_edge)
-      {
-        s_transmission_state = TRANSMISSION_STATE_NEUTRAL_READY;
-        s_vehicle_control.gear = VEHICLE_GEAR_NEUTRAL;
-        s_vehicle_control.neutral_locked = false;
-        reset_brake_interlocks();
-      }
       break;
 
     case TRANSMISSION_STATE_NEUTRAL_READY:
-      if (unlock_combo_edge)
-      {
-        enter_locked_neutral();
-      }
-      else if (down_shift_edge)
+      if (down_shift_edge)
       {
         s_transmission_state = TRANSMISSION_STATE_REVERSE;
         s_vehicle_control.gear = VEHICLE_GEAR_REVERSE;
@@ -268,11 +274,7 @@ static void update_transmission_state(
       break;
 
     case TRANSMISSION_STATE_DRIVE:
-      if (unlock_combo_edge)
-      {
-        enter_locked_neutral();
-      }
-      else if (down_shift_edge)
+      if (down_shift_edge)
       {
         s_transmission_state = TRANSMISSION_STATE_REVERSE;
         s_vehicle_control.gear = VEHICLE_GEAR_REVERSE;
@@ -281,11 +283,7 @@ static void update_transmission_state(
       break;
 
     case TRANSMISSION_STATE_REVERSE:
-      if (unlock_combo_edge)
-      {
-        enter_locked_neutral();
-      }
-      else if (up_shift_edge)
+      if (up_shift_edge)
       {
         s_transmission_state = TRANSMISSION_STATE_DRIVE;
         s_vehicle_control.gear = VEHICLE_GEAR_DRIVE;
@@ -302,13 +300,14 @@ static void update_transmission_state(
 void vehicle_control_init(void)
 {
   enter_locked_neutral();
+  s_vehicle_control.drive_mode = VEHICLE_DRIVE_MODE_NORMAL;
+  s_vehicle_control.camera_rear_active = false;
   s_vehicle_control.sync_buttons_on_next_step = true;
   s_vehicle_control.prev_down_shift = false;
   s_vehicle_control.prev_up_shift = false;
   s_vehicle_control.prev_mode_toggle = false;
-  s_vehicle_control.prev_unlock_combo = false;
+  s_vehicle_control.prev_camera_toggle = false;
   s_vehicle_control.prev_safe_neutral = false;
-  s_vehicle_control.sport_mode_active = false;
   reset_brake_interlocks();
 }
 
@@ -317,20 +316,33 @@ void vehicle_control_on_signal_lost(void)
   s_vehicle_control.sync_buttons_on_next_step = true;
 }
 
-void vehicle_control_step(const rc_state_t* rc_state, vehicle_command_t* out_command)
+void vehicle_control_get_status(vehicle_command_t* out_command)
+{
+  if (out_command == 0)
+  {
+    return;
+  }
+
+  out_command->lenkung_us = CONTROL_NEUTRAL_US;
+  out_command->esc_us = CONTROL_NEUTRAL_US;
+  out_command->gear = s_vehicle_control.gear;
+  out_command->drive_mode = s_vehicle_control.drive_mode;
+  out_command->neutral_locked = s_vehicle_control.neutral_locked;
+  out_command->camera_rear_active = s_vehicle_control.camera_rear_active;
+}
+
+void vehicle_control_step(const rc_state_t* rc_state, bool unlock_combo_edge, vehicle_command_t* out_command)
 {
   const bool down_shift = rc_button_is_pressed(rc_state, BUTTON_DOWN_SHIFT);
   const bool up_shift = rc_button_is_pressed(rc_state, BUTTON_UP_SHIFT);
+  const bool camera_toggle = rc_button_is_pressed(rc_state, BUTTON_R2);
   const bool mode_toggle = rc_button_is_pressed(rc_state, BUTTON_L2);
-  const bool unlock_combo =
-      rc_button_is_pressed(rc_state, BUTTON_L1) &&
-      rc_button_is_pressed(rc_state, BUTTON_R1);
   const bool safe_neutral = rc_button_is_pressed(rc_state, BUTTON_PS);
   bool safe_neutral_edge = false;
-  bool unlock_combo_edge = false;
   bool down_shift_edge = false;
   bool up_shift_edge = false;
   bool mode_toggle_edge = false;
+  bool camera_toggle_edge = false;
 
   if (out_command == 0)
   {
@@ -341,30 +353,53 @@ void vehicle_control_step(const rc_state_t* rc_state, vehicle_command_t* out_com
   {
     s_vehicle_control.prev_down_shift = down_shift;
     s_vehicle_control.prev_up_shift = up_shift;
+    s_vehicle_control.prev_camera_toggle = camera_toggle;
     s_vehicle_control.prev_mode_toggle = mode_toggle;
-    s_vehicle_control.prev_unlock_combo = unlock_combo;
     s_vehicle_control.prev_safe_neutral = safe_neutral;
     s_vehicle_control.sync_buttons_on_next_step = false;
   }
   else
   {
     safe_neutral_edge = button_rising_edge(safe_neutral, &s_vehicle_control.prev_safe_neutral);
-    unlock_combo_edge = button_rising_edge(unlock_combo, &s_vehicle_control.prev_unlock_combo);
     down_shift_edge = button_rising_edge(down_shift, &s_vehicle_control.prev_down_shift);
     up_shift_edge = button_rising_edge(up_shift, &s_vehicle_control.prev_up_shift);
+    camera_toggle_edge = button_rising_edge(camera_toggle, &s_vehicle_control.prev_camera_toggle);
     mode_toggle_edge = button_rising_edge(mode_toggle, &s_vehicle_control.prev_mode_toggle);
   }
 
   if (mode_toggle_edge)
   {
-    s_vehicle_control.sport_mode_active = !s_vehicle_control.sport_mode_active;
+    s_vehicle_control.drive_mode =
+        (s_vehicle_control.drive_mode == VEHICLE_DRIVE_MODE_SPORT) ? VEHICLE_DRIVE_MODE_NORMAL : VEHICLE_DRIVE_MODE_SPORT;
   }
 
-  update_transmission_state(down_shift_edge, up_shift_edge, unlock_combo_edge, safe_neutral_edge);
+  if (camera_toggle_edge)
+  {
+    s_vehicle_control.camera_rear_active = !s_vehicle_control.camera_rear_active;
+  }
 
-  out_command->lenkung_us = (rc_state != 0) ? apply_steering_expo(rc_state->lenkung_us) : ESC_NEUTRAL_US;
+  update_transmission_state(down_shift_edge, up_shift_edge, safe_neutral_edge);
+
+  if (unlock_combo_edge)
+  {
+    if (s_transmission_state == TRANSMISSION_STATE_NEUTRAL_LOCKED)
+    {
+      s_transmission_state = TRANSMISSION_STATE_NEUTRAL_READY;
+      s_vehicle_control.gear = VEHICLE_GEAR_NEUTRAL;
+      s_vehicle_control.neutral_locked = false;
+      reset_brake_interlocks();
+    }
+    else
+    {
+      enter_locked_neutral();
+    }
+  }
+
+  out_command->lenkung_us = (rc_state != 0) ? apply_steering_curve(rc_state->lenkung_us) : CONTROL_NEUTRAL_US;
   out_command->esc_us =
-      (rc_state != 0) ? mix_esc_output(s_vehicle_control.gear, rc_state->gas_us, rc_state->bremse_us) : ESC_NEUTRAL_US;
+      (rc_state != 0) ? mix_esc_output(s_vehicle_control.gear, rc_state->gas_us, rc_state->bremse_us) : CONTROL_NEUTRAL_US;
   out_command->gear = s_vehicle_control.gear;
+  out_command->drive_mode = s_vehicle_control.drive_mode;
   out_command->neutral_locked = s_vehicle_control.neutral_locked;
+  out_command->camera_rear_active = s_vehicle_control.camera_rear_active;
 }

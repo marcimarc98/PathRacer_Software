@@ -6,6 +6,11 @@
 #define PWM_PERIOD_TICKS          20000U
 #define SERVO_PWM_CHANNEL_COMPARE TIM3->CCR1
 #define ESC_PWM_CHANNEL_COMPARE   TIM3->CCR2
+#define CAMERA_PWM_CHANNEL_COMPARE TIM2->CCR1
+#define CAMERA_PWM_FRONT_US       1100U
+#define CAMERA_PWM_REAR_US        1900U
+
+static bool s_camera_rear_active = false;
 
 static int clamp_us(int pulse_us)
 {
@@ -22,13 +27,7 @@ static int clamp_us(int pulse_us)
   return pulse_us;
 }
 
-static void write_pwm_outputs(int servo_us, int esc_us)
-{
-  SERVO_PWM_CHANNEL_COMPARE = (uint32_t)clamp_us(servo_us);
-  ESC_PWM_CHANNEL_COMPARE = (uint32_t)clamp_us(esc_us);
-}
-
-static uint32_t get_tim3_clock_hz(void)
+static uint32_t get_apb_timer_clock_hz(void)
 {
   const uint32_t pclk1_hz = HAL_RCC_GetPCLK1Freq();
   const uint32_t ppre1 = RCC->CFGR & RCC_CFGR_PPRE1;
@@ -41,10 +40,24 @@ static uint32_t get_tim3_clock_hz(void)
   return pclk1_hz * 2U;
 }
 
+static void write_camera_pwm_output(bool camera_rear_active)
+{
+  s_camera_rear_active = camera_rear_active;
+  CAMERA_PWM_CHANNEL_COMPARE = camera_rear_active ? CAMERA_PWM_REAR_US : CAMERA_PWM_FRONT_US;
+}
+
+static void write_pwm_outputs(int servo_us, int esc_us, bool camera_rear_active)
+{
+  SERVO_PWM_CHANNEL_COMPARE = (uint32_t)clamp_us(servo_us);
+  ESC_PWM_CHANNEL_COMPARE = (uint32_t)clamp_us(esc_us);
+  write_camera_pwm_output(camera_rear_active);
+}
+
 void drive_pwm_init(void)
 {
-  GPIO_InitTypeDef gpio = {0};
-  uint32_t timer_clock_hz = get_tim3_clock_hz();
+  GPIO_InitTypeDef gpio_tim3 = {0};
+  GPIO_InitTypeDef gpio_tim2 = {0};
+  uint32_t timer_clock_hz = get_apb_timer_clock_hz();
   uint32_t prescaler = 0U;
 
   if (timer_clock_hz < PWM_TIMER_TICK_HZ)
@@ -56,13 +69,21 @@ void drive_pwm_init(void)
 
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_TIM3_CLK_ENABLE();
+  __HAL_RCC_TIM2_CLK_ENABLE();
 
-  gpio.Pin = SERVO_PWM_Pin | ESC_PWM_Pin;
-  gpio.Mode = GPIO_MODE_AF_PP;
-  gpio.Pull = GPIO_NOPULL;
-  gpio.Speed = GPIO_SPEED_FREQ_HIGH;
-  gpio.Alternate = GPIO_AF2_TIM3;
-  HAL_GPIO_Init(GPIOA, &gpio);
+  gpio_tim3.Pin = SERVO_PWM_Pin | ESC_PWM_Pin;
+  gpio_tim3.Mode = GPIO_MODE_AF_PP;
+  gpio_tim3.Pull = GPIO_NOPULL;
+  gpio_tim3.Speed = GPIO_SPEED_FREQ_HIGH;
+  gpio_tim3.Alternate = GPIO_AF2_TIM3;
+  HAL_GPIO_Init(GPIOA, &gpio_tim3);
+
+  gpio_tim2.Pin = CAMERA_PWM_Pin;
+  gpio_tim2.Mode = GPIO_MODE_AF_PP;
+  gpio_tim2.Pull = GPIO_NOPULL;
+  gpio_tim2.Speed = GPIO_SPEED_FREQ_HIGH;
+  gpio_tim2.Alternate = GPIO_AF1_TIM2;
+  HAL_GPIO_Init(GPIOA, &gpio_tim2);
 
   TIM3->CR1 = 0U;
   TIM3->PSC = prescaler;
@@ -78,15 +99,24 @@ void drive_pwm_init(void)
   TIM3->EGR = TIM_EGR_UG;
   TIM3->CR1 = TIM_CR1_ARPE | TIM_CR1_CEN;
 
-  write_pwm_outputs(1500, 1500);
+  TIM2->CR1 = 0U;
+  TIM2->PSC = prescaler;
+  TIM2->ARR = PWM_PERIOD_TICKS - 1U;
+  TIM2->CCR1 = CAMERA_PWM_FRONT_US;
+  TIM2->CCMR1 = TIM_CCMR1_OC1PE | (6U << TIM_CCMR1_OC1M_Pos);
+  TIM2->CCER = TIM_CCER_CC1E;
+  TIM2->EGR = TIM_EGR_UG;
+  TIM2->CR1 = TIM_CR1_ARPE | TIM_CR1_CEN;
+
+  write_pwm_outputs(1500, 1500, false);
 }
 
-void drive_pwm_apply(int servo_us, int esc_us)
+void drive_pwm_apply(int servo_us, int esc_us, bool camera_rear_active)
 {
-  write_pwm_outputs(servo_us, esc_us);
+  write_pwm_outputs(servo_us, esc_us, camera_rear_active);
 }
 
 void drive_pwm_apply_failsafe(void)
 {
-  write_pwm_outputs(1500, 1500);
+  write_pwm_outputs(1500, 1500, s_camera_rear_active);
 }

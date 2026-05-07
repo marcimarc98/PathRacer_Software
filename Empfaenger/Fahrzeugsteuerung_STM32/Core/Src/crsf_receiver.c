@@ -164,7 +164,7 @@ void crsf_receiver_init(void)
   s_crsf_uart.Init.WordLength = UART_WORDLENGTH_8B;
   s_crsf_uart.Init.StopBits = UART_STOPBITS_1;
   s_crsf_uart.Init.Parity = UART_PARITY_NONE;
-  s_crsf_uart.Init.Mode = UART_MODE_RX;
+  s_crsf_uart.Init.Mode = UART_MODE_TX_RX;
   s_crsf_uart.Init.HwFlowCtl = UART_HWCONTROL_NONE;
   s_crsf_uart.Init.OverSampling = UART_OVERSAMPLING_16;
   s_crsf_uart.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
@@ -180,6 +180,16 @@ void crsf_receiver_init(void)
   __HAL_UART_ENABLE_IT(&s_crsf_uart, UART_IT_RXNE);
   __HAL_UART_ENABLE_IT(&s_crsf_uart, UART_IT_ERR);
   __HAL_UART_ENABLE_IT(&s_crsf_uart, UART_IT_PE);
+}
+
+bool crsf_receiver_send_frame(const uint8_t* frame, uint8_t length)
+{
+  if ((frame == 0) || (length == 0U))
+  {
+    return false;
+  }
+
+  return HAL_UART_Transmit(&s_crsf_uart, (uint8_t*)frame, length, 10U) == HAL_OK;
 }
 
 void crsf_receiver_irq_handler(void)

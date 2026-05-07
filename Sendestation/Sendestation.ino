@@ -1,5 +1,9 @@
 #include <Arduino.h>
+#include <stdio.h>
+#include <string.h>
 #include "driver/uart.h"
+#include "driver/gpio.h"
+#include "esp32-hal-matrix.h"
 #include "esp_err.h"
 
 // --------------------------------------------------
@@ -14,8 +18,10 @@ static constexpr uint32_t DEBUG_BAUD = 115200;
 static constexpr uint32_t DEBUG_PERIOD_MS = 100;
 
 static constexpr uint32_t USB_BAUD       = 460800;
-static constexpr uint32_t CRSF_BAUD      = 416666;
+static constexpr uint32_t CRSF_BAUD      = 420000;
 static constexpr uint32_t SEND_PERIOD_US = 4000;   // 250 Hz
+static constexpr uint32_t STATUS_PERIOD_MS = 100;
+static constexpr uint32_t STATUS_VALID_MS = 3000;
 
 static constexpr bool INVERT_TX = false;
 
@@ -24,6 +30,15 @@ static constexpr bool INVERT_TX = false;
 // --------------------------------------------------
 #define CRSF_SYNC_BYTE                    0xC8
 #define CRSF_FRAMETYPE_RC_CHANNELS_PACKED 0x16
+#define CRSF_FRAMETYPE_BATTERY_SENSOR     0x08
+#define CRSF_FRAMETYPE_FLIGHT_MODE        0x21
+#define CRSF_FRAMETYPE_DEVICE_PING        0x28
+#define CRSF_FRAMETYPE_DEVICE_INFO        0x29
+#define CRSF_MAX_FRAME_SIZE               64
+#define CRSF_MIN_LENGTH_FIELD             2
+#define CRSF_MAX_LENGTH_FIELD             62
+#define CRSF_ADDRESS_RADIO                0xEA
+#define CRSF_ADDRESS_TX_MODULE            0xEE
 
 #define CRSF_NUM_CHANNELS      16
 #define CRSF_PAYLOAD_SIZE      22
@@ -42,6 +57,11 @@ static constexpr uint8_t HOST_HEADER_2 = 0x55;
 static constexpr size_t HOST_PACKET_SIZE = 11;
 static constexpr int UNUSED_BUTTON_CHANNEL_VALUE = CRSF_CHANNEL_VALUE_MIN;
 
+static constexpr uint8_t STATUS_HEADER_1 = 0x5A;
+static constexpr uint8_t STATUS_HEADER_2 = 0xA5;
+static constexpr uint8_t STATUS_PACKET_TYPE = 0x31;
+static constexpr size_t STATUS_PACKET_SIZE = 10;
+
 // --------------------------------------------------
 // Struct
 // --------------------------------------------------
@@ -52,12 +72,44 @@ typedef struct {
     bool Knopf[13];
 } Steuerdaten;
 
+typedef struct {
+    bool valid;
+    char gear;
+    bool sportMode;
+    bool mainLightOn;
+    bool cameraRearActive;
+    uint16_t batteryMv;
+    uint8_t batteryPercent;
+    uint32_t lastUpdateMs;
+    uint32_t lastLinkActivityMs;
+    uint8_t sequence;
+} FahrzeugStatus;
+
+typedef struct {
+    uint32_t hostPacketsDecoded;
+    uint32_t telemetryBytesSeen;
+    uint32_t telemetryFramesSeen;
+    uint32_t telemetryCrcErrors;
+    uint32_t flightModeFramesSeen;
+    uint32_t batteryFramesSeen;
+    uint32_t deviceInfoFramesSeen;
+    uint8_t lastTelemetryType;
+    uint8_t rawSample[16];
+    uint8_t rawSampleCount;
+} DebugStats;
+
 static Steuerdaten s;
+static FahrzeugStatus s_vehicleStatus;
+static DebugStats s_debugStats;
 static uint16_t txChannels[CRSF_NUM_CHANNELS];
 static uint8_t txFrame[CRSF_TOTAL_FRAME_SIZE];
 static uint8_t hostPacket[HOST_PACKET_SIZE];
 static uint8_t hostIdx = 0;
 static uint16_t s_lastButtonsMask = 0;
+static uint8_t rxFrame[CRSF_MAX_FRAME_SIZE];
+static uint8_t rxFrameIdx = 0;
+static uint8_t rxExpectedTotal = 0;
+static bool s_crsfTxAttached = false;
 
 // --------------------------------------------------
 // CRC8 Lookup Table, Poly 0xD5
@@ -257,10 +309,164 @@ static bool frameMatchesChannels(const uint8_t frame[CRSF_TOTAL_FRAME_SIZE], con
     return true;
 }
 
+static bool isValidSyncByte(uint8_t value) {
+    switch (value) {
+        case 0x00:
+        case 0xC8:
+        case 0xEA:
+        case 0xEC:
+        case 0xEE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static void enterCrsfListenMode() {
+    if (s_crsfTxAttached) {
+        pinMatrixOutDetach(CRSF_DATA_PIN, false, false);
+        s_crsfTxAttached = false;
+    }
+
+    gpio_set_direction((gpio_num_t)CRSF_DATA_PIN, GPIO_MODE_INPUT);
+    gpio_set_pull_mode((gpio_num_t)CRSF_DATA_PIN, GPIO_PULLUP_ONLY);
+}
+
+static void enterCrsfSendMode() {
+    gpio_set_direction((gpio_num_t)CRSF_DATA_PIN, GPIO_MODE_INPUT_OUTPUT);
+    gpio_set_pull_mode((gpio_num_t)CRSF_DATA_PIN, GPIO_PULLUP_ONLY);
+    ESP_ERROR_CHECK(uart_set_pin(UART_CRSF, CRSF_DATA_PIN, CRSF_DATA_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    s_crsfTxAttached = true;
+}
+
+static inline void resetTelemetryParser() {
+    rxFrameIdx = 0;
+    rxExpectedTotal = 0;
+}
+
+static uint8_t gearToCode(char gear) {
+    switch (gear) {
+        case 'N': return 1U;
+        case 'D': return 2U;
+        case 'R': return 3U;
+        default: return 0U;
+    }
+}
+
+static void parseFlightModePayload(const uint8_t* payload, size_t payloadLength) {
+    char modeText[32];
+    char gear = 'N';
+    char driveMode[8] = {0};
+    unsigned int light = 0;
+    unsigned int camera = 0;
+    const size_t copyLength = min(payloadLength, sizeof(modeText) - 1U);
+
+    memcpy(modeText, payload, copyLength);
+    modeText[copyLength] = '\0';
+
+    if (sscanf(modeText, "%c|%7[^|]|L%u|C%u", &gear, driveMode, &light, &camera) == 4) {
+        s_vehicleStatus.valid = true;
+        s_vehicleStatus.gear = gear;
+        s_vehicleStatus.sportMode = strcmp(driveMode, "SPORT") == 0;
+        s_vehicleStatus.mainLightOn = light != 0U;
+        s_vehicleStatus.cameraRearActive = camera != 0U;
+        s_vehicleStatus.lastUpdateMs = millis();
+    }
+}
+
+static void parseBatteryPayload(const uint8_t* payload, size_t payloadLength) {
+    if (payloadLength < 8U) {
+        return;
+    }
+
+    s_vehicleStatus.batteryMv = (uint16_t)(((payload[0] << 8) | payload[1]) * 10U);
+    s_vehicleStatus.batteryPercent = payload[7];
+    s_vehicleStatus.lastUpdateMs = millis();
+}
+
+static void processTelemetryFrame(const uint8_t* frame) {
+    const uint8_t length = frame[1];
+    const uint8_t type = frame[2];
+    const uint8_t receivedCrc = frame[1U + length];
+    const uint8_t calculatedCrc = crc8(&frame[2], (uint8_t)(length - 1U));
+    const uint8_t* payload = &frame[3];
+    const size_t payloadLength = (size_t)(length - 2U);
+
+    s_debugStats.telemetryFramesSeen++;
+    s_debugStats.lastTelemetryType = type;
+
+    if (receivedCrc != calculatedCrc) {
+        s_debugStats.telemetryCrcErrors++;
+        return;
+    }
+
+    s_vehicleStatus.lastLinkActivityMs = millis();
+
+    if (type == CRSF_FRAMETYPE_FLIGHT_MODE) {
+        s_debugStats.flightModeFramesSeen++;
+        parseFlightModePayload(payload, payloadLength);
+        return;
+    }
+
+    if (type == CRSF_FRAMETYPE_BATTERY_SENSOR) {
+        s_debugStats.batteryFramesSeen++;
+        parseBatteryPayload(payload, payloadLength);
+        return;
+    }
+
+    if (type == CRSF_FRAMETYPE_DEVICE_INFO) {
+        s_debugStats.deviceInfoFramesSeen++;
+    }
+}
+
+static void processTelemetryByte(uint8_t value) {
+    if (rxFrameIdx == 0U) {
+        if (!isValidSyncByte(value)) {
+            return;
+        }
+
+        rxFrame[rxFrameIdx++] = value;
+        return;
+    }
+
+    if (rxFrameIdx == 1U) {
+        if ((value < CRSF_MIN_LENGTH_FIELD) || (value > CRSF_MAX_LENGTH_FIELD)) {
+            if (isValidSyncByte(value)) {
+                rxFrame[0] = value;
+                rxFrameIdx = 1U;
+                rxExpectedTotal = 0U;
+            } else {
+                resetTelemetryParser();
+            }
+            return;
+        }
+
+        rxFrame[rxFrameIdx++] = value;
+        rxExpectedTotal = (uint8_t)(value + 2U);
+
+        if (rxExpectedTotal > CRSF_MAX_FRAME_SIZE) {
+            resetTelemetryParser();
+        }
+        return;
+    }
+
+    rxFrame[rxFrameIdx++] = value;
+
+    if (rxFrameIdx == rxExpectedTotal) {
+        processTelemetryFrame(rxFrame);
+        resetTelemetryParser();
+        return;
+    }
+
+    if (rxFrameIdx >= CRSF_MAX_FRAME_SIZE) {
+        resetTelemetryParser();
+    }
+}
+
 // --------------------------------------------------
 // CRSF UART
 // --------------------------------------------------
-static void init_uart_crsf_tx() {
+static void init_uart_crsf_singlewire() {
     uart_config_t cfg = {};
     cfg.baud_rate = (int)CRSF_BAUD;
     cfg.data_bits = UART_DATA_8_BITS;
@@ -269,16 +475,8 @@ static void init_uart_crsf_tx() {
     cfg.flow_ctrl = UART_HW_FLOWCTRL_DISABLE;
     cfg.source_clk = UART_SCLK_DEFAULT;
 
-    // TX-only toward the ELRS sender module. No shared RX/TX pin, no half-duplex mode.
-    ESP_ERROR_CHECK(uart_driver_install(UART_CRSF, 256, 0, 0, nullptr, 0));
+    ESP_ERROR_CHECK(uart_driver_install(UART_CRSF, 256, 1024, 0, nullptr, 0));
     ESP_ERROR_CHECK(uart_param_config(UART_CRSF, &cfg));
-    ESP_ERROR_CHECK(uart_set_pin(
-        UART_CRSF,
-        CRSF_DATA_PIN,
-        UART_PIN_NO_CHANGE,
-        UART_PIN_NO_CHANGE,
-        UART_PIN_NO_CHANGE
-    ));
     ESP_ERROR_CHECK(uart_set_mode(UART_CRSF, UART_MODE_UART));
 
     if (INVERT_TX) {
@@ -286,6 +484,9 @@ static void init_uart_crsf_tx() {
     } else {
         ESP_ERROR_CHECK(uart_set_line_inverse(UART_CRSF, UART_SIGNAL_INV_DISABLE));
     }
+
+    enterCrsfSendMode();
+    enterCrsfListenMode();
 }
 
 // --------------------------------------------------
@@ -374,6 +575,104 @@ static void debugPrintState(uint16_t buttonsMask) {
     debugWriteLine(line);
 }
 
+static void readCrsfTelemetry() {
+    uint8_t buffer[64];
+    const int bytesRead = uart_read_bytes(UART_CRSF, buffer, sizeof(buffer), 0);
+
+    if (bytesRead <= 0) {
+        return;
+    }
+
+    s_debugStats.telemetryBytesSeen += (uint32_t)bytesRead;
+
+    for (int i = 0; i < bytesRead; i++) {
+        if (s_debugStats.rawSampleCount < sizeof(s_debugStats.rawSample)) {
+            s_debugStats.rawSample[s_debugStats.rawSampleCount++] = buffer[i];
+        }
+        processTelemetryByte(buffer[i]);
+    }
+}
+
+static void sendUsbDebugLine() {
+    static uint32_t lastDebugUsbMs = 0;
+    char line[160];
+    char rawHex[16 * 3 + 1];
+    size_t rawOffset = 0;
+    const uint32_t nowMs = millis();
+
+    if ((nowMs - lastDebugUsbMs) < 1000U) {
+        return;
+    }
+
+    lastDebugUsbMs = nowMs;
+
+    rawHex[0] = '\0';
+    for (uint8_t i = 0; i < s_debugStats.rawSampleCount && rawOffset + 4U < sizeof(rawHex); i++) {
+        rawOffset += (size_t)snprintf(&rawHex[rawOffset], sizeof(rawHex) - rawOffset, "%02X", s_debugStats.rawSample[i]);
+        if ((i + 1U) < s_debugStats.rawSampleCount && rawOffset + 2U < sizeof(rawHex)) {
+            rawHex[rawOffset++] = '.';
+            rawHex[rawOffset] = '\0';
+        }
+    }
+
+    snprintf(
+        line,
+        sizeof(line),
+        "!dbg host=%lu rx=%lu frm=%lu crc=%lu fm=%lu bat=%lu dev=%lu last=%02X valid=%u gear=%c mv=%u pct=%u raw=%s\n",
+        (unsigned long)s_debugStats.hostPacketsDecoded,
+        (unsigned long)s_debugStats.telemetryBytesSeen,
+        (unsigned long)s_debugStats.telemetryFramesSeen,
+        (unsigned long)s_debugStats.telemetryCrcErrors,
+        (unsigned long)s_debugStats.flightModeFramesSeen,
+        (unsigned long)s_debugStats.batteryFramesSeen,
+        (unsigned long)s_debugStats.deviceInfoFramesSeen,
+        (unsigned int)s_debugStats.lastTelemetryType,
+        s_vehicleStatus.valid ? 1U : 0U,
+        s_vehicleStatus.gear,
+        (unsigned int)s_vehicleStatus.batteryMv,
+        (unsigned int)s_vehicleStatus.batteryPercent,
+        rawHex);
+    Serial.print(line);
+    s_debugStats.rawSampleCount = 0;
+}
+
+static void sendVehicleStatusToHost() {
+    static uint32_t lastStatusMs = 0;
+    uint8_t packet[STATUS_PACKET_SIZE];
+    uint8_t checksum = 0;
+    uint8_t flags = 0;
+    const uint32_t nowMs = millis();
+    const bool linkActive = (nowMs - s_vehicleStatus.lastLinkActivityMs) <= STATUS_VALID_MS;
+
+    if ((nowMs - lastStatusMs) < STATUS_PERIOD_MS) {
+        return;
+    }
+
+    lastStatusMs = nowMs;
+
+    if (linkActive) flags |= 0x01U;
+    if (s_vehicleStatus.sportMode) flags |= 0x02U;
+    if (s_vehicleStatus.mainLightOn) flags |= 0x04U;
+    if (s_vehicleStatus.cameraRearActive) flags |= 0x10U;
+
+    packet[0] = STATUS_HEADER_1;
+    packet[1] = STATUS_HEADER_2;
+    packet[2] = STATUS_PACKET_TYPE;
+    packet[3] = flags;
+    packet[4] = gearToCode(s_vehicleStatus.gear);
+    packet[5] = s_vehicleStatus.batteryPercent;
+    packet[6] = (uint8_t)(s_vehicleStatus.batteryMv & 0xFFU);
+    packet[7] = (uint8_t)((s_vehicleStatus.batteryMv >> 8U) & 0xFFU);
+    packet[8] = s_vehicleStatus.sequence++;
+
+    for (size_t i = 0; i < STATUS_PACKET_SIZE - 1U; i++) {
+        checksum ^= packet[i];
+    }
+
+    packet[9] = checksum;
+    Serial.write(packet, sizeof(packet));
+}
+
 // --------------------------------------------------
 // Binaerparser fuer das Hostpaket
 // --------------------------------------------------
@@ -406,6 +705,7 @@ static bool decodeHostPacket(const uint8_t *packet, Steuerdaten &out) {
     }
 
     s_lastButtonsMask = buttons;
+    s_debugStats.hostPacketsDecoded++;
     return true;
 }
 
@@ -458,13 +758,29 @@ void setup() {
         s.Knopf[i] = false;
     }
 
-    init_uart_crsf_tx();
+    s_vehicleStatus.valid = false;
+    s_vehicleStatus.gear = 'N';
+    s_vehicleStatus.sportMode = false;
+    s_vehicleStatus.mainLightOn = false;
+    s_vehicleStatus.cameraRearActive = false;
+    s_vehicleStatus.batteryMv = 0;
+    s_vehicleStatus.batteryPercent = 0;
+    s_vehicleStatus.lastUpdateMs = 0;
+    s_vehicleStatus.lastLinkActivityMs = 0;
+    s_vehicleStatus.sequence = 0;
+    memset(&s_debugStats, 0, sizeof(s_debugStats));
+
+    resetTelemetryParser();
+    init_uart_crsf_singlewire();
     init_uart_debug();
     debugWriteLine("ESP Debug UART aktiv\r\n");
 }
 
 void loop() {
     readLaptopData();
+    readCrsfTelemetry();
+    sendVehicleStatusToHost();
+    sendUsbDebugLine();
 
     static uint32_t nextSendUs = 0;
     uint32_t nowUs = micros();
@@ -479,7 +795,10 @@ void loop() {
         fillChannels(txChannels);
         buildCrsfRcChannelsFrame(txFrame, txChannels);
 
+        enterCrsfSendMode();
         uart_write_bytes(UART_CRSF, (const char*)txFrame, sizeof(txFrame));
+        uart_wait_tx_done(UART_CRSF, pdMS_TO_TICKS(2));
+        enterCrsfListenMode();
         debugPrintState(s_lastButtonsMask);
     }
 }
