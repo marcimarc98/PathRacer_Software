@@ -1,0 +1,37 @@
+{
+  "actionButtons": {
+    "defaultColor": "orange",
+    "commands": [
+      {
+        "name": "Build",
+        "tooltip": "Configure and build Debug preset",
+        "useVsCodeApi": true,
+        "command": "workbench.action.tasks.runTask",
+        "args": [
+          "Build Debug"
+        ]
+      },
+      {
+        "name": "Flash",
+        "tooltip": "Flash Debug firmware",
+        "useVsCodeApi": true,
+        "command": "workbench.action.tasks.runTask",
+        "args": [
+          "Flash STM32 (CubeProgrammer CLI)"
+        ]
+      },
+      {
+        "name": "Debug",
+        "tooltip": "Start STM32 debug session",
+        "useVsCodeApi": true,
+        "command": "workbench.action.debug.start"
+      }
+    ]
+  },
+  "cmake.useCMakePresets": "always",
+  "cmake.configureOnOpen": true,
+  "cmake.configurePreset": "Debug",
+  "cmake.buildPreset": "Debug",
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/Debug/compile_commands.json"
+}

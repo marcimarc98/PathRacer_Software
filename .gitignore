@@ -1,0 +1,54 @@
+# OS / Explorer
+Thumbs.db
+Desktop.ini
+
+# Local tooling
+.codex-tools/
+.idea/
+.vs/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# CMake / native builds
+build/
+cmake-build-*/
+Debug/
+Release/
+out/
+
+# STM32 / embedded generated artifacts
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+*.o
+*.d
+*.su
+*.launch
+
+# ESP-IDF
+sdkconfig.old
+sdkconfig.*.old
+
+# .NET / C#
+bin/
+obj/
+publish/
+
+# Logs / temporary files
+*.log
+*.tmp
+*.temp
+*.cache
+
+# NuGet local caches inside projects
+project.assets.json
+project.nuget.cache
+
