@@ -63,7 +63,7 @@ void Error_Handler(void);
 #define BATTERY_ADC_GPIO_Port GPIOA
 #define BATTERY_TEMP_ADC_Pin GPIO_PIN_1
 #define BATTERY_TEMP_ADC_GPIO_Port GPIOA
-#define CAMERA_PWM_Pin GPIO_PIN_11
+#define CAMERA_PWM_Pin GPIO_PIN_0
 #define CAMERA_PWM_GPIO_Port GPIOA
 #define CRSF_TX_Pin GPIO_PIN_9
 #define CRSF_TX_GPIO_Port GPIOA
