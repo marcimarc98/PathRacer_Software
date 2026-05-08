@@ -1,8 +1,12 @@
-namespace LenkradSenderApp;
+﻿namespace LenkradSenderApp;
 
 partial class Form1
 {
     private System.ComponentModel.IContainer components = null;
+    private MenuStrip menuMain;
+    private ToolStripMenuItem menuSettings;
+    private ToolStripMenuItem menuDebug;
+    private ToolStripMenuItem menuControlsHelp;
     private Label labelPort;
     private ComboBox comboPorts;
     private Button buttonRefreshPorts;
@@ -29,17 +33,27 @@ partial class Form1
     private Label labelGearCaption;
     private Label labelGearValue;
     private Label labelVehicleLinkCaption;
+    private Label labelVehicleLinkIcon;
     private Label labelVehicleLinkValue;
     private Label labelVehicleModeCaption;
+    private Label labelVehicleModeIcon;
     private Label labelVehicleModeValue;
     private Label labelVehicleCameraCaption;
+    private Label labelVehicleCameraIcon;
     private Label labelVehicleCameraValue;
     private Label labelVehicleLightCaption;
+    private Label labelVehicleLightIcon;
     private Label labelVehicleLightValue;
     private Label labelVehicleBatteryCaption;
+    private Label labelVehicleBatteryIcon;
     private Label labelVehicleBatteryValue;
+    private Label labelVehicleTempCaption;
+    private Label labelVehicleTempIcon;
+    private Label labelVehicleTempValue;
     private Label labelVehicleDebugCaption;
     private Label labelVehicleDebugValue;
+    private Label labelVehicleControlsCaption;
+    private Label labelVehicleControlsValue;
 
     protected override void Dispose(bool disposing)
     {
@@ -54,6 +68,10 @@ partial class Form1
     private void InitializeComponent()
     {
         components = new System.ComponentModel.Container();
+        menuMain = new MenuStrip();
+        menuSettings = new ToolStripMenuItem();
+        menuDebug = new ToolStripMenuItem();
+        menuControlsHelp = new ToolStripMenuItem();
         labelPort = new Label();
         comboPorts = new ComboBox();
         buttonRefreshPorts = new Button();
@@ -80,26 +98,67 @@ partial class Form1
         labelGearCaption = new Label();
         labelGearValue = new Label();
         labelVehicleLinkCaption = new Label();
+        labelVehicleLinkIcon = new Label();
         labelVehicleLinkValue = new Label();
         labelVehicleModeCaption = new Label();
+        labelVehicleModeIcon = new Label();
         labelVehicleModeValue = new Label();
         labelVehicleCameraCaption = new Label();
+        labelVehicleCameraIcon = new Label();
         labelVehicleCameraValue = new Label();
         labelVehicleLightCaption = new Label();
+        labelVehicleLightIcon = new Label();
         labelVehicleLightValue = new Label();
         labelVehicleBatteryCaption = new Label();
+        labelVehicleBatteryIcon = new Label();
         labelVehicleBatteryValue = new Label();
+        labelVehicleTempCaption = new Label();
+        labelVehicleTempIcon = new Label();
+        labelVehicleTempValue = new Label();
         labelVehicleDebugCaption = new Label();
         labelVehicleDebugValue = new Label();
+        labelVehicleControlsCaption = new Label();
+        labelVehicleControlsValue = new Label();
         groupStatus.SuspendLayout();
         groupLive.SuspendLayout();
         groupVehicle.SuspendLayout();
         SuspendLayout();
         // 
+        // menuMain
+        // 
+        menuMain.Items.AddRange(new ToolStripItem[] { menuSettings, menuControlsHelp });
+        menuMain.Location = new Point(0, 0);
+        menuMain.Name = "menuMain";
+        menuMain.Size = new Size(1524, 24);
+        menuMain.TabIndex = 0;
+        menuMain.Text = "menuMain";
+        // 
+        // menuSettings
+        // 
+        menuSettings.DropDownItems.AddRange(new ToolStripItem[] { menuDebug });
+        menuSettings.Name = "menuSettings";
+        menuSettings.Size = new Size(61, 20);
+        menuSettings.Text = "Settings";
+        // 
+        // menuDebug
+        // 
+        menuDebug.CheckOnClick = true;
+        menuDebug.Name = "menuDebug";
+        menuDebug.Size = new Size(108, 22);
+        menuDebug.Text = "Debug";
+        menuDebug.CheckedChanged += menuDebug_CheckedChanged;
+        // 
+        // menuControlsHelp
+        // 
+        menuControlsHelp.Name = "menuControlsHelp";
+        menuControlsHelp.Size = new Size(123, 20);
+        menuControlsHelp.Text = "Bedienungshinweise";
+        menuControlsHelp.Click += menuControlsHelp_Click;
+        // 
         // labelPort
         // 
         labelPort.AutoSize = true;
-        labelPort.Location = new Point(18, 20);
+        labelPort.Location = new Point(18, 44);
         labelPort.Name = "labelPort";
         labelPort.Size = new Size(61, 15);
         labelPort.TabIndex = 0;
@@ -109,14 +168,14 @@ partial class Form1
         // 
         comboPorts.DropDownStyle = ComboBoxStyle.DropDownList;
         comboPorts.FormattingEnabled = true;
-        comboPorts.Location = new Point(18, 38);
+        comboPorts.Location = new Point(18, 62);
         comboPorts.Name = "comboPorts";
         comboPorts.Size = new Size(150, 23);
         comboPorts.TabIndex = 1;
         // 
         // buttonRefreshPorts
         // 
-        buttonRefreshPorts.Location = new Point(180, 37);
+        buttonRefreshPorts.Location = new Point(180, 61);
         buttonRefreshPorts.Name = "buttonRefreshPorts";
         buttonRefreshPorts.Size = new Size(95, 25);
         buttonRefreshPorts.TabIndex = 2;
@@ -126,7 +185,7 @@ partial class Form1
         // 
         // buttonStart
         // 
-        buttonStart.Location = new Point(292, 37);
+        buttonStart.Location = new Point(292, 61);
         buttonStart.Name = "buttonStart";
         buttonStart.Size = new Size(95, 25);
         buttonStart.TabIndex = 3;
@@ -136,7 +195,7 @@ partial class Form1
         // 
         // buttonStop
         // 
-        buttonStop.Location = new Point(402, 37);
+        buttonStop.Location = new Point(402, 61);
         buttonStop.Name = "buttonStop";
         buttonStop.Size = new Size(95, 25);
         buttonStop.TabIndex = 4;
@@ -154,13 +213,15 @@ partial class Form1
         groupStatus.Controls.Add(labelPacketsValue);
         groupStatus.Controls.Add(labelStateCaption);
         groupStatus.Controls.Add(labelStateValue);
-        groupStatus.Location = new Point(18, 79);
+        groupStatus.Location = new Point(18, 103);
         groupStatus.Name = "groupStatus";
         groupStatus.Size = new Size(520, 123);
         groupStatus.TabIndex = 6;
         groupStatus.TabStop = false;
         groupStatus.Text = "Status";
         groupStatus.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+        groupStatus.BackColor = Color.FromArgb(252, 253, 255);
+        groupStatus.ForeColor = Color.FromArgb(36, 42, 50);
         // 
         // labelWheelCaption
         // 
@@ -239,13 +300,15 @@ partial class Form1
         groupLive.Controls.Add(labelGasLiveValue);
         groupLive.Controls.Add(labelBrakeLiveCaption);
         groupLive.Controls.Add(labelBrakeLiveValue);
-        groupLive.Location = new Point(18, 218);
+        groupLive.Location = new Point(18, 242);
         groupLive.Name = "groupLive";
         groupLive.Size = new Size(520, 132);
         groupLive.TabIndex = 7;
         groupLive.TabStop = false;
         groupLive.Text = "Live-Daten";
         groupLive.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+        groupLive.BackColor = Color.FromArgb(252, 253, 255);
+        groupLive.ForeColor = Color.FromArgb(36, 42, 50);
         //
         // labelSteeringLiveCaption
         //
@@ -303,24 +366,36 @@ partial class Form1
         groupVehicle.Controls.Add(labelGearCaption);
         groupVehicle.Controls.Add(labelGearValue);
         groupVehicle.Controls.Add(labelVehicleLinkCaption);
+        groupVehicle.Controls.Add(labelVehicleLinkIcon);
         groupVehicle.Controls.Add(labelVehicleLinkValue);
         groupVehicle.Controls.Add(labelVehicleModeCaption);
+        groupVehicle.Controls.Add(labelVehicleModeIcon);
         groupVehicle.Controls.Add(labelVehicleModeValue);
         groupVehicle.Controls.Add(labelVehicleCameraCaption);
+        groupVehicle.Controls.Add(labelVehicleCameraIcon);
         groupVehicle.Controls.Add(labelVehicleCameraValue);
         groupVehicle.Controls.Add(labelVehicleLightCaption);
+        groupVehicle.Controls.Add(labelVehicleLightIcon);
         groupVehicle.Controls.Add(labelVehicleLightValue);
         groupVehicle.Controls.Add(labelVehicleBatteryCaption);
+        groupVehicle.Controls.Add(labelVehicleBatteryIcon);
         groupVehicle.Controls.Add(labelVehicleBatteryValue);
+        groupVehicle.Controls.Add(labelVehicleTempCaption);
+        groupVehicle.Controls.Add(labelVehicleTempIcon);
+        groupVehicle.Controls.Add(labelVehicleTempValue);
         groupVehicle.Controls.Add(labelVehicleDebugCaption);
         groupVehicle.Controls.Add(labelVehicleDebugValue);
-        groupVehicle.Location = new Point(556, 79);
+        groupVehicle.Controls.Add(labelVehicleControlsCaption);
+        groupVehicle.Controls.Add(labelVehicleControlsValue);
+        groupVehicle.Location = new Point(570, 103);
         groupVehicle.Name = "groupVehicle";
-        groupVehicle.Size = new Size(950, 614);
+        groupVehicle.Size = new Size(936, 590);
         groupVehicle.TabIndex = 8;
         groupVehicle.TabStop = false;
         groupVehicle.Text = "Fahrzeugdaten / Rueckkanal";
         groupVehicle.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+        groupVehicle.BackColor = Color.FromArgb(250, 252, 255);
+        groupVehicle.ForeColor = Color.FromArgb(34, 40, 48);
         // 
         // labelGearCaption
         // 
@@ -346,124 +421,230 @@ partial class Form1
         // 
         labelVehicleLinkCaption.AutoSize = true;
         labelVehicleLinkCaption.Font = new Font("Segoe UI", 14F, FontStyle.Bold, GraphicsUnit.Point, 0);
-        labelVehicleLinkCaption.Location = new Point(260, 42);
+        labelVehicleLinkCaption.Location = new Point(315, 42);
         labelVehicleLinkCaption.Name = "labelVehicleLinkCaption";
         labelVehicleLinkCaption.Size = new Size(119, 25);
         labelVehicleLinkCaption.TabIndex = 2;
         labelVehicleLinkCaption.Text = "Rueckkanal:";
+        // 
+        // labelVehicleLinkIcon
+        // 
+        labelVehicleLinkIcon.Font = new Font("Segoe UI Emoji", 20F, FontStyle.Regular, GraphicsUnit.Point, 0);
+        labelVehicleLinkIcon.ForeColor = Color.DeepSkyBlue;
+        labelVehicleLinkIcon.Location = new Point(260, 34);
+        labelVehicleLinkIcon.Name = "labelVehicleLinkIcon";
+        labelVehicleLinkIcon.Size = new Size(42, 42);
+        labelVehicleLinkIcon.TabIndex = 3;
+        labelVehicleLinkIcon.Text = "📡";
+        labelVehicleLinkIcon.TextAlign = ContentAlignment.MiddleCenter;
         // 
         // labelVehicleLinkValue
         // 
         labelVehicleLinkValue.Font = new Font("Segoe UI", 18F, FontStyle.Regular, GraphicsUnit.Point, 0);
         labelVehicleLinkValue.Location = new Point(470, 42);
         labelVehicleLinkValue.Name = "labelVehicleLinkValue";
-        labelVehicleLinkValue.Size = new Size(320, 34);
-        labelVehicleLinkValue.TabIndex = 3;
+        labelVehicleLinkValue.Size = new Size(180, 34);
+        labelVehicleLinkValue.TabIndex = 4;
         labelVehicleLinkValue.Text = "Inaktiv";
         // 
         // labelVehicleModeCaption
         // 
         labelVehicleModeCaption.AutoSize = true;
         labelVehicleModeCaption.Font = new Font("Segoe UI", 14F, FontStyle.Bold, GraphicsUnit.Point, 0);
-        labelVehicleModeCaption.Location = new Point(260, 97);
+        labelVehicleModeCaption.Location = new Point(315, 97);
         labelVehicleModeCaption.Name = "labelVehicleModeCaption";
         labelVehicleModeCaption.Size = new Size(122, 25);
-        labelVehicleModeCaption.TabIndex = 4;
+        labelVehicleModeCaption.TabIndex = 5;
         labelVehicleModeCaption.Text = "Fahrmodus:";
+        // 
+        // labelVehicleModeIcon
+        // 
+        labelVehicleModeIcon.Font = new Font("Segoe UI Emoji", 20F, FontStyle.Regular, GraphicsUnit.Point, 0);
+        labelVehicleModeIcon.ForeColor = Color.DarkOrange;
+        labelVehicleModeIcon.Location = new Point(260, 89);
+        labelVehicleModeIcon.Name = "labelVehicleModeIcon";
+        labelVehicleModeIcon.Size = new Size(42, 42);
+        labelVehicleModeIcon.TabIndex = 6;
+        labelVehicleModeIcon.Text = "🏁";
+        labelVehicleModeIcon.TextAlign = ContentAlignment.MiddleCenter;
         // 
         // labelVehicleModeValue
         // 
         labelVehicleModeValue.Font = new Font("Segoe UI", 18F, FontStyle.Regular, GraphicsUnit.Point, 0);
         labelVehicleModeValue.Location = new Point(470, 97);
         labelVehicleModeValue.Name = "labelVehicleModeValue";
-        labelVehicleModeValue.Size = new Size(320, 34);
-        labelVehicleModeValue.TabIndex = 5;
+        labelVehicleModeValue.Size = new Size(180, 34);
+        labelVehicleModeValue.TabIndex = 7;
         labelVehicleModeValue.Text = "-";
         // 
         // labelVehicleCameraCaption
         // 
         labelVehicleCameraCaption.AutoSize = true;
         labelVehicleCameraCaption.Font = new Font("Segoe UI", 14F, FontStyle.Bold, GraphicsUnit.Point, 0);
-        labelVehicleCameraCaption.Location = new Point(260, 152);
+        labelVehicleCameraCaption.Location = new Point(315, 152);
         labelVehicleCameraCaption.Name = "labelVehicleCameraCaption";
         labelVehicleCameraCaption.Size = new Size(88, 25);
-        labelVehicleCameraCaption.TabIndex = 6;
+        labelVehicleCameraCaption.TabIndex = 8;
         labelVehicleCameraCaption.Text = "Kamera:";
+        // 
+        // labelVehicleCameraIcon
+        // 
+        labelVehicleCameraIcon.Font = new Font("Segoe UI Emoji", 20F, FontStyle.Regular, GraphicsUnit.Point, 0);
+        labelVehicleCameraIcon.ForeColor = Color.DeepSkyBlue;
+        labelVehicleCameraIcon.Location = new Point(260, 144);
+        labelVehicleCameraIcon.Name = "labelVehicleCameraIcon";
+        labelVehicleCameraIcon.Size = new Size(42, 42);
+        labelVehicleCameraIcon.TabIndex = 9;
+        labelVehicleCameraIcon.Text = "📷";
+        labelVehicleCameraIcon.TextAlign = ContentAlignment.MiddleCenter;
         // 
         // labelVehicleCameraValue
         // 
         labelVehicleCameraValue.Font = new Font("Segoe UI", 18F, FontStyle.Regular, GraphicsUnit.Point, 0);
         labelVehicleCameraValue.Location = new Point(470, 152);
         labelVehicleCameraValue.Name = "labelVehicleCameraValue";
-        labelVehicleCameraValue.Size = new Size(320, 34);
-        labelVehicleCameraValue.TabIndex = 7;
+        labelVehicleCameraValue.Size = new Size(180, 34);
+        labelVehicleCameraValue.TabIndex = 10;
         labelVehicleCameraValue.Text = "-";
         // 
         // labelVehicleLightCaption
         // 
         labelVehicleLightCaption.AutoSize = true;
         labelVehicleLightCaption.Font = new Font("Segoe UI", 14F, FontStyle.Bold, GraphicsUnit.Point, 0);
-        labelVehicleLightCaption.Location = new Point(260, 207);
+        labelVehicleLightCaption.Location = new Point(315, 207);
         labelVehicleLightCaption.Name = "labelVehicleLightCaption";
         labelVehicleLightCaption.Size = new Size(60, 25);
-        labelVehicleLightCaption.TabIndex = 8;
+        labelVehicleLightCaption.TabIndex = 11;
         labelVehicleLightCaption.Text = "Licht:";
+        // 
+        // labelVehicleLightIcon
+        // 
+        labelVehicleLightIcon.Font = new Font("Segoe UI Emoji", 20F, FontStyle.Regular, GraphicsUnit.Point, 0);
+        labelVehicleLightIcon.ForeColor = Color.LimeGreen;
+        labelVehicleLightIcon.Location = new Point(260, 199);
+        labelVehicleLightIcon.Name = "labelVehicleLightIcon";
+        labelVehicleLightIcon.Size = new Size(42, 42);
+        labelVehicleLightIcon.TabIndex = 12;
+        labelVehicleLightIcon.Text = "💡";
+        labelVehicleLightIcon.TextAlign = ContentAlignment.MiddleCenter;
         // 
         // labelVehicleLightValue
         // 
         labelVehicleLightValue.Font = new Font("Segoe UI", 18F, FontStyle.Regular, GraphicsUnit.Point, 0);
         labelVehicleLightValue.Location = new Point(470, 207);
         labelVehicleLightValue.Name = "labelVehicleLightValue";
-        labelVehicleLightValue.Size = new Size(320, 34);
-        labelVehicleLightValue.TabIndex = 9;
+        labelVehicleLightValue.Size = new Size(180, 34);
+        labelVehicleLightValue.TabIndex = 13;
         labelVehicleLightValue.Text = "-";
         // 
         // labelVehicleBatteryCaption
         // 
         labelVehicleBatteryCaption.AutoSize = true;
         labelVehicleBatteryCaption.Font = new Font("Segoe UI", 14F, FontStyle.Bold, GraphicsUnit.Point, 0);
-        labelVehicleBatteryCaption.Location = new Point(260, 262);
+        labelVehicleBatteryCaption.Location = new Point(315, 262);
         labelVehicleBatteryCaption.Name = "labelVehicleBatteryCaption";
-        labelVehicleBatteryCaption.Size = new Size(61, 25);
-        labelVehicleBatteryCaption.TabIndex = 10;
-        labelVehicleBatteryCaption.Text = "Akku:";
+        labelVehicleBatteryCaption.Size = new Size(89, 25);
+        labelVehicleBatteryCaption.TabIndex = 14;
+        labelVehicleBatteryCaption.Text = "Akku [%]:";
+        // 
+        // labelVehicleBatteryIcon
+        // 
+        labelVehicleBatteryIcon.Font = new Font("Segoe UI Emoji", 20F, FontStyle.Regular, GraphicsUnit.Point, 0);
+        labelVehicleBatteryIcon.ForeColor = Color.DeepSkyBlue;
+        labelVehicleBatteryIcon.Location = new Point(260, 254);
+        labelVehicleBatteryIcon.Name = "labelVehicleBatteryIcon";
+        labelVehicleBatteryIcon.Size = new Size(42, 42);
+        labelVehicleBatteryIcon.TabIndex = 15;
+        labelVehicleBatteryIcon.Text = "🔋";
+        labelVehicleBatteryIcon.TextAlign = ContentAlignment.MiddleCenter;
         // 
         // labelVehicleBatteryValue
         // 
         labelVehicleBatteryValue.Font = new Font("Segoe UI", 18F, FontStyle.Regular, GraphicsUnit.Point, 0);
         labelVehicleBatteryValue.Location = new Point(470, 262);
         labelVehicleBatteryValue.Name = "labelVehicleBatteryValue";
-        labelVehicleBatteryValue.Size = new Size(360, 34);
-        labelVehicleBatteryValue.TabIndex = 11;
+        labelVehicleBatteryValue.Size = new Size(180, 34);
+        labelVehicleBatteryValue.TabIndex = 16;
         labelVehicleBatteryValue.Text = "--";
+        // 
+        // labelVehicleTempCaption
+        // 
+        labelVehicleTempCaption.AutoSize = true;
+        labelVehicleTempCaption.Font = new Font("Segoe UI", 14F, FontStyle.Bold, GraphicsUnit.Point, 0);
+        labelVehicleTempCaption.Location = new Point(315, 317);
+        labelVehicleTempCaption.Name = "labelVehicleTempCaption";
+        labelVehicleTempCaption.Size = new Size(92, 25);
+        labelVehicleTempCaption.TabIndex = 17;
+        labelVehicleTempCaption.Text = "Akku [°C]:";
+        // 
+        // labelVehicleTempIcon
+        // 
+        labelVehicleTempIcon.Font = new Font("Segoe UI Emoji", 20F, FontStyle.Regular, GraphicsUnit.Point, 0);
+        labelVehicleTempIcon.ForeColor = Color.OrangeRed;
+        labelVehicleTempIcon.Location = new Point(260, 309);
+        labelVehicleTempIcon.Name = "labelVehicleTempIcon";
+        labelVehicleTempIcon.Size = new Size(42, 42);
+        labelVehicleTempIcon.TabIndex = 18;
+        labelVehicleTempIcon.Text = "";
+        labelVehicleTempIcon.TextAlign = ContentAlignment.MiddleCenter;
+        // 
+        // labelVehicleTempValue
+        // 
+        labelVehicleTempValue.Font = new Font("Segoe UI", 18F, FontStyle.Regular, GraphicsUnit.Point, 0);
+        labelVehicleTempValue.Location = new Point(470, 317);
+        labelVehicleTempValue.Name = "labelVehicleTempValue";
+        labelVehicleTempValue.Size = new Size(180, 34);
+        labelVehicleTempValue.TabIndex = 19;
+        labelVehicleTempValue.Text = "--";
         // 
         // labelVehicleDebugCaption
         // 
         labelVehicleDebugCaption.AutoSize = true;
         labelVehicleDebugCaption.Font = new Font("Segoe UI", 14F, FontStyle.Bold, GraphicsUnit.Point, 0);
-        labelVehicleDebugCaption.Location = new Point(260, 322);
+        labelVehicleDebugCaption.Location = new Point(710, 42);
         labelVehicleDebugCaption.Name = "labelVehicleDebugCaption";
         labelVehicleDebugCaption.Size = new Size(74, 25);
-        labelVehicleDebugCaption.TabIndex = 12;
+        labelVehicleDebugCaption.TabIndex = 20;
         labelVehicleDebugCaption.Text = "Debug:";
         // 
         // labelVehicleDebugValue
         // 
-        labelVehicleDebugValue.Font = new Font("Consolas", 16F, FontStyle.Regular, GraphicsUnit.Point, 0);
-        labelVehicleDebugValue.Location = new Point(470, 322);
+        labelVehicleDebugValue.Font = new Font("Consolas", 11F, FontStyle.Regular, GraphicsUnit.Point, 0);
+        labelVehicleDebugValue.Location = new Point(710, 78);
         labelVehicleDebugValue.Name = "labelVehicleDebugValue";
-        labelVehicleDebugValue.Size = new Size(430, 120);
-        labelVehicleDebugValue.TabIndex = 13;
-        labelVehicleDebugValue.Text = "RX 0   FRM 0   CRC 0\r\nFM 0   BAT 0   DEV 0   LAST 0x00\r\nVALID 0   GEAR -   MV 0   PCT 0";
+        labelVehicleDebugValue.Size = new Size(190, 220);
+        labelVehicleDebugValue.TabIndex = 21;
+        labelVehicleDebugValue.Text = "RX Bytes: 0\r\nFrames: 0\r\nCRC Fehler: 0\r\nFlightMode: 0\r\nBattery: 0\r\nDevice: 0\r\nLast Type: 0x00\r\nValid: 0";
+        // 
+        // labelVehicleControlsCaption
+        // 
+        labelVehicleControlsCaption.AutoSize = true;
+        labelVehicleControlsCaption.Font = new Font("Segoe UI", 14F, FontStyle.Bold, GraphicsUnit.Point, 0);
+        labelVehicleControlsCaption.Location = new Point(24, 504);
+        labelVehicleControlsCaption.Name = "labelVehicleControlsCaption";
+        labelVehicleControlsCaption.Size = new Size(137, 25);
+        labelVehicleControlsCaption.TabIndex = 22;
+        labelVehicleControlsCaption.Text = "Tastenbelegung";
+        // 
+        // labelVehicleControlsValue
+        // 
+        labelVehicleControlsValue.Font = new Font("Segoe UI", 10.5F, FontStyle.Regular, GraphicsUnit.Point, 0);
+        labelVehicleControlsValue.Location = new Point(24, 536);
+        labelVehicleControlsValue.Name = "labelVehicleControlsValue";
+        labelVehicleControlsValue.Size = new Size(860, 58);
+        labelVehicleControlsValue.TabIndex = 23;
+        labelVehicleControlsValue.Text = "L1 + R1: Fahrstufe aus N freigeben   |   PS: Sicherheits-N\r\nUp Shift: D   |   Down Shift: R   |   L2: Fahrmodus Normal/Sport\r\nR2: Kamera vorne/hinten   |   R1: Licht ein/aus   |   L1: Lichthupe";
         // 
         // textStatusLog
         // 
-        textStatusLog.Location = new Point(18, 368);
+        textStatusLog.Location = new Point(18, 392);
         textStatusLog.Multiline = true;
         textStatusLog.Name = "textStatusLog";
+        textStatusLog.BackColor = Color.FromArgb(255, 255, 255);
+        textStatusLog.BorderStyle = BorderStyle.FixedSingle;
         textStatusLog.ReadOnly = true;
         textStatusLog.ScrollBars = ScrollBars.Vertical;
-        textStatusLog.Size = new Size(520, 325);
+        textStatusLog.Size = new Size(520, 301);
         textStatusLog.TabIndex = 8;
         textStatusLog.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left;
         // 
@@ -471,6 +652,7 @@ partial class Form1
         // 
         AutoScaleDimensions = new SizeF(7F, 15F);
         AutoScaleMode = AutoScaleMode.Font;
+        BackColor = Color.FromArgb(236, 240, 246);
         ClientSize = new Size(1524, 711);
         Controls.Add(textStatusLog);
         Controls.Add(groupVehicle);
@@ -481,10 +663,12 @@ partial class Form1
         Controls.Add(buttonRefreshPorts);
         Controls.Add(comboPorts);
         Controls.Add(labelPort);
+        Controls.Add(menuMain);
         MinimumSize = new Size(1400, 750);
+        MainMenuStrip = menuMain;
         Name = "Form1";
         StartPosition = FormStartPosition.CenterScreen;
-        Text = "Lenkrad Sender";
+        Text = "Vehicle Ground Station";
         WindowState = FormWindowState.Maximized;
         groupStatus.ResumeLayout(false);
         groupStatus.PerformLayout();
@@ -496,3 +680,4 @@ partial class Form1
         PerformLayout();
     }
 }
+

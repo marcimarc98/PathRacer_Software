@@ -61,6 +61,8 @@ void Error_Handler(void);
 #define MCO_GPIO_Port GPIOF
 #define BATTERY_ADC_Pin GPIO_PIN_0
 #define BATTERY_ADC_GPIO_Port GPIOA
+#define BATTERY_TEMP_ADC_Pin GPIO_PIN_1
+#define BATTERY_TEMP_ADC_GPIO_Port GPIOA
 #define CRSF_TX_Pin GPIO_PIN_9
 #define CRSF_TX_GPIO_Port GPIOA
 #define CRSF_RX_Pin GPIO_PIN_10

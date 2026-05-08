@@ -18,7 +18,7 @@ public sealed class SenderService : IDisposable
     private const byte StatusHeader1 = 0x5A;
     private const byte StatusHeader2 = 0xA5;
     private const byte StatusPacketType = 0x31;
-    private const int StatusPacketSize = 10;
+    private const int StatusPacketSize = 20;
 
     private SerialPort? _serialPort;
     private DirectInputWheel? _wheel;
@@ -418,7 +418,16 @@ public sealed class SenderService : IDisposable
             MainLightOn: (flags & 0x04) != 0,
             CameraRearActive: (flags & 0x10) != 0,
             BatteryMv: (ushort)(packet[6] | (packet[7] << 8)),
-            BatteryPercent: packet[5]);
+            BatteryPercent: packet[5],
+            BatteryTempC: (short)(packet[8] | (packet[9] << 8)),
+            UplinkLq: packet[10],
+            UplinkRssi: packet[11],
+            UplinkSnr: unchecked((sbyte)packet[12]),
+            DownlinkLq: packet[13],
+            DownlinkRssi: packet[14],
+            DownlinkSnr: unchecked((sbyte)packet[15]),
+            RfProfile: packet[16],
+            TxPower: packet[17]);
         return true;
     }
 
@@ -485,18 +494,25 @@ public sealed class SenderService : IDisposable
             CrcErrors: ParseUInt(values, "crc"),
             FlightModeFrames: ParseUInt(values, "fm"),
             BatteryFrames: ParseUInt(values, "bat"),
+            LinkStatsFrames: ParseUInt(values, "ls"),
             DeviceInfoFrames: ParseUInt(values, "dev"),
             LastTypeHex: values.TryGetValue("last", out var last) ? last : "00",
             Valid: ParseUInt(values, "valid") != 0U,
             Gear: values.TryGetValue("gear", out var gear) && gear.Length > 0 ? gear[0] : '-',
             BatteryMv: (ushort)Math.Min(ParseUInt(values, "mv"), ushort.MaxValue),
-            BatteryPercent: (byte)Math.Min(ParseUInt(values, "pct"), byte.MaxValue));
+            BatteryPercent: (byte)Math.Min(ParseUInt(values, "pct"), byte.MaxValue),
+            BatteryTempC: ParseInt(values, "tmp"));
         return true;
     }
 
     private static uint ParseUInt(Dictionary<string, string> values, string key)
     {
         return values.TryGetValue(key, out var text) && uint.TryParse(text, out var value) ? value : 0U;
+    }
+
+    private static short ParseInt(Dictionary<string, string> values, string key)
+    {
+        return values.TryGetValue(key, out var text) && short.TryParse(text, out var value) ? value : (short)0;
     }
 
     public void Dispose()
@@ -522,9 +538,18 @@ public sealed class SenderService : IDisposable
         bool MainLightOn,
         bool CameraRearActive,
         ushort BatteryMv,
-        byte BatteryPercent)
+        byte BatteryPercent,
+        short BatteryTempC,
+        byte UplinkLq,
+        byte UplinkRssi,
+        sbyte UplinkSnr,
+        byte DownlinkLq,
+        byte DownlinkRssi,
+        sbyte DownlinkSnr,
+        byte RfProfile,
+        byte TxPower)
     {
-        public static readonly VehicleTelemetrySnapshot Empty = new(false, '-', false, false, false, 0, 0);
+        public static readonly VehicleTelemetrySnapshot Empty = new(false, '-', false, false, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
 
     public readonly record struct DebugTelemetrySnapshot(
@@ -534,14 +559,16 @@ public sealed class SenderService : IDisposable
         uint CrcErrors,
         uint FlightModeFrames,
         uint BatteryFrames,
+        uint LinkStatsFrames,
         uint DeviceInfoFrames,
         string LastTypeHex,
         bool Valid,
         char Gear,
         ushort BatteryMv,
-        byte BatteryPercent)
+        byte BatteryPercent,
+        short BatteryTempC)
     {
-        public static readonly DebugTelemetrySnapshot Empty = new(0, 0, 0, 0, 0, 0, 0, "00", false, '-', 0, 0);
+        public static readonly DebugTelemetrySnapshot Empty = new(0, 0, 0, 0, 0, 0, 0, 0, "00", false, '-', 0, 0, 0);
     }
 
 }

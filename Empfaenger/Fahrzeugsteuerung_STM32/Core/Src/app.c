@@ -1,11 +1,11 @@
 #include "app.h"
-#include "battery_monitor.h"
 #include "crsf_telemetry.h"
 #include "crsf_receiver.h"
 #include "drive_pwm.h"
 #include "lights_control.h"
 #include "main.h"
 #include "rc_state.h"
+#include "sensor_data.h"
 #include "vehicle_control.h"
 
 #define RC_SIGNAL_TIMEOUT_MS 500U
@@ -17,11 +17,11 @@ static void app_run_control_cycle(void)
   vehicle_command_t vehicle_command;
   lights_control_output_t lights_state;
   crsf_vehicle_status_t telemetry_status;
-  battery_status_t battery_status;
+  sensor_data_status_t sensor_status;
 
   rc_state_snapshot(&rc_state);
-  battery_monitor_sample();
-  battery_monitor_get_status(&battery_status);
+  sensor_data_sample();
+  sensor_data_get_status(&sensor_status);
 
   if (rc_state_signal_is_recent(&rc_state, now_ms, RC_SIGNAL_TIMEOUT_MS))
   {
@@ -44,8 +44,9 @@ static void app_run_control_cycle(void)
   telemetry_status.neutral_locked = vehicle_command.neutral_locked;
   telemetry_status.camera_rear_active = vehicle_command.camera_rear_active;
   telemetry_status.main_light_on = lights_state.main_light_on;
-  telemetry_status.battery_mv = battery_status.battery_mv;
-  telemetry_status.battery_percent = battery_status.battery_percent;
+  telemetry_status.battery_mv = sensor_status.battery_mv;
+  telemetry_status.battery_percent = sensor_status.battery_percent;
+  telemetry_status.battery_temp_c = sensor_status.battery_temp_c;
 
   crsf_telemetry_process(now_ms, &telemetry_status);
 }
@@ -53,7 +54,7 @@ static void app_run_control_cycle(void)
 void app_init(void)
 {
   rc_state_init();
-  battery_monitor_init();
+  sensor_data_init();
   vehicle_control_init();
   lights_control_init();
   drive_pwm_init();
