@@ -59,7 +59,7 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define MCO_Pin GPIO_PIN_0
 #define MCO_GPIO_Port GPIOF
-#define BATTERY_ADC_Pin GPIO_PIN_0
+#define BATTERY_ADC_Pin GPIO_PIN_3
 #define BATTERY_ADC_GPIO_Port GPIOA
 #define BATTERY_TEMP_ADC_Pin GPIO_PIN_1
 #define BATTERY_TEMP_ADC_GPIO_Port GPIOA
@@ -71,7 +71,7 @@ void Error_Handler(void);
 #define SERVO_PWM_GPIO_Port GPIOA
 #define ESC_PWM_Pin GPIO_PIN_7
 #define ESC_PWM_GPIO_Port GPIOA
-#define CAMERA_PWM_Pin GPIO_PIN_15
+#define CAMERA_PWM_Pin GPIO_PIN_0
 #define CAMERA_PWM_GPIO_Port GPIOA
 #define LIGHT_MAIN_Pin GPIO_PIN_4
 #define LIGHT_MAIN_GPIO_Port GPIOB

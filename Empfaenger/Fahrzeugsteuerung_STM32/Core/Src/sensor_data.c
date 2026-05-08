@@ -13,6 +13,7 @@
 #define BATTERY_DIVIDER_BOTTOM_OHM       1000U
 #define BATTERY_EMPTY_MV                 13200U
 #define BATTERY_FULL_MV                  16800U
+#define BATTERY_FILTER_WINDOW_SAMPLES    32U
 
 #define BATTERY_TEMP_DIVIDER_PULLUP_OHM  10000.0f
 #define BATTERY_TEMP_NTC_R25_OHM         10000.0f
@@ -21,7 +22,12 @@
 #define BATTERY_TEMP_MIN_C               (-40)
 #define BATTERY_TEMP_MAX_C               125
 
+#define BATTERY_ADC_CHANNEL_INDEX        4U
+#define BATTERY_TEMP_ADC_CHANNEL_INDEX   2U
+
 static sensor_data_status_t s_sensor_status;
+static uint32_t s_battery_raw_accumulator = 0U;
+static uint32_t s_battery_raw_sample_count = 0U;
 
 static uint16_t clamp_u16(uint32_t value)
 {
@@ -184,7 +190,7 @@ void sensor_data_init(void)
   ADC1->ISR |= ADC_ISR_ADRDY;
   ADC1->CFGR = 0U;
   ADC1->SMPR1 =
-      (6U << ADC_SMPR1_SMP1_Pos) |
+      (6U << ADC_SMPR1_SMP4_Pos) |
       (6U << ADC_SMPR1_SMP2_Pos);
   ADC1->CR |= ADC_CR_ADEN;
 
@@ -201,14 +207,31 @@ void sensor_data_init(void)
   s_sensor_status.battery_mv = 0U;
   s_sensor_status.battery_percent = 0U;
   s_sensor_status.battery_temp_c = 0;
+  s_battery_raw_accumulator = 0U;
+  s_battery_raw_sample_count = 0U;
 }
 
 void sensor_data_sample(void)
 {
-  const uint16_t battery_raw = adc_read_channel(1U);
-  const uint16_t battery_temp_raw = adc_read_channel(2U);
+  const uint16_t battery_raw = adc_read_channel(BATTERY_ADC_CHANNEL_INDEX);
+  const uint16_t battery_temp_raw = adc_read_channel(BATTERY_TEMP_ADC_CHANNEL_INDEX);
+  uint16_t filtered_battery_raw = battery_raw;
 
-  s_sensor_status.battery_mv = battery_voltage_mv_from_counts(battery_raw);
+  s_battery_raw_accumulator += battery_raw;
+  s_battery_raw_sample_count++;
+
+  if (s_battery_raw_sample_count >= BATTERY_FILTER_WINDOW_SAMPLES)
+  {
+    filtered_battery_raw = (uint16_t)(s_battery_raw_accumulator / BATTERY_FILTER_WINDOW_SAMPLES);
+    s_battery_raw_accumulator = filtered_battery_raw;
+    s_battery_raw_sample_count = 1U;
+  }
+  else if (s_battery_raw_sample_count > 0U)
+  {
+    filtered_battery_raw = (uint16_t)(s_battery_raw_accumulator / s_battery_raw_sample_count);
+  }
+
+  s_sensor_status.battery_mv = battery_voltage_mv_from_counts(filtered_battery_raw);
   s_sensor_status.battery_percent = battery_mv_to_percent(s_sensor_status.battery_mv);
   s_sensor_status.battery_temp_c = battery_temp_c_from_counts(battery_temp_raw);
 }

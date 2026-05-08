@@ -413,6 +413,7 @@ public sealed class SenderService : IDisposable
 
         telemetry = new VehicleTelemetrySnapshot(
             LinkActive: (flags & 0x01) != 0,
+            VehicleStatusValid: (flags & 0x08) != 0,
             Gear: gear,
             SportMode: (flags & 0x02) != 0,
             MainLightOn: (flags & 0x04) != 0,
@@ -533,6 +534,7 @@ public sealed class SenderService : IDisposable
 
     public readonly record struct VehicleTelemetrySnapshot(
         bool LinkActive,
+        bool VehicleStatusValid,
         char Gear,
         bool SportMode,
         bool MainLightOn,
@@ -549,7 +551,7 @@ public sealed class SenderService : IDisposable
         byte RfProfile,
         byte TxPower)
     {
-        public static readonly VehicleTelemetrySnapshot Empty = new(false, '-', false, false, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        public static readonly VehicleTelemetrySnapshot Empty = new(false, false, '-', false, false, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
 
     public readonly record struct DebugTelemetrySnapshot(

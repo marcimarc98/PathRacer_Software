@@ -5,17 +5,19 @@
 
 #include "driver/gpio.h"
 #include "driver/uart.h"
-#include "driver/usb_serial_jtag.h"
 #include "esp_err.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#define UART_HOST                   UART_NUM_0
 #define UART_CRSF                   UART_NUM_1
+#define HOST_TX_PIN                 GPIO_NUM_43
+#define HOST_RX_PIN                 GPIO_NUM_44
 #define CRSF_TX_PIN                 GPIO_NUM_17
 #define CRSF_RX_PIN                 GPIO_NUM_18
 
-#define USB_BAUD_INFO               460800U
+#define HOST_BAUD                   460800U
 #define CRSF_BAUD                   420000U
 #define SEND_PERIOD_US              4000U
 #define STATUS_PERIOD_MS            100U
@@ -460,13 +462,13 @@ static uint8_t gear_to_code(char gear)
     }
 }
 
-static void usb_write_all(const void *data, size_t length)
+static void host_write_all(const void *data, size_t length)
 {
     const uint8_t *ptr = (const uint8_t *)data;
     size_t remaining = length;
 
     while (remaining > 0U) {
-        int written = usb_serial_jtag_write_bytes(ptr, remaining, 0U);
+        int written = uart_write_bytes(UART_HOST, ptr, remaining);
         if (written <= 0) {
             vTaskDelay(pdMS_TO_TICKS(1));
             continue;
@@ -484,6 +486,7 @@ static void send_vehicle_status_to_host(void)
     uint8_t flags = 0U;
     uint32_t now_ms = millis_now();
     bool link_active = (now_ms - s_vehicle_status.last_link_activity_ms) <= STATUS_VALID_MS;
+    bool vehicle_status_valid = s_vehicle_status.valid && ((now_ms - s_vehicle_status.last_update_ms) <= STATUS_VALID_MS);
 
     if ((now_ms - last_status_ms) < STATUS_PERIOD_MS) {
         return;
@@ -493,6 +496,9 @@ static void send_vehicle_status_to_host(void)
 
     if (link_active) {
         flags |= 0x01U;
+    }
+    if (vehicle_status_valid) {
+        flags |= 0x08U;
     }
     if (s_vehicle_status.sport_mode) {
         flags |= 0x02U;
@@ -529,7 +535,7 @@ static void send_vehicle_status_to_host(void)
     }
     packet[19] = checksum;
 
-    usb_write_all(packet, sizeof(packet));
+    host_write_all(packet, sizeof(packet));
 }
 
 static void send_usb_debug_line(void)
@@ -563,7 +569,7 @@ static void send_usb_debug_line(void)
         (unsigned int)s_vehicle_status.battery_percent,
         (int)s_vehicle_status.battery_temp_c);
 
-    usb_write_all(line, strlen(line));
+    host_write_all(line, strlen(line));
 }
 
 static bool decode_host_packet(const uint8_t *packet, steuerdaten_t *out_state)
@@ -603,7 +609,7 @@ static void reset_host_parser(void)
 static void read_host_packets(void)
 {
     uint8_t buffer[64];
-    int bytes_read = usb_serial_jtag_read_bytes(buffer, sizeof(buffer), 0U);
+    int bytes_read = uart_read_bytes(UART_HOST, buffer, sizeof(buffer), 0U);
 
     for (int i = 0; i < bytes_read; i++) {
         uint8_t value = buffer[i];
@@ -639,12 +645,21 @@ static void read_host_packets(void)
     }
 }
 
-static void init_usb_serial(void)
+static void init_host_uart(void)
 {
-    usb_serial_jtag_driver_config_t cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
-    cfg.tx_buffer_size = 2048U;
-    cfg.rx_buffer_size = 512U;
-    ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&cfg));
+    uart_config_t cfg = {
+        .baud_rate = (int)HOST_BAUD,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+
+    ESP_ERROR_CHECK(uart_driver_install(UART_HOST, 1024, 1024, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_param_config(UART_HOST, &cfg));
+    ESP_ERROR_CHECK(uart_set_mode(UART_HOST, UART_MODE_UART));
+    ESP_ERROR_CHECK(uart_set_pin(UART_HOST, HOST_TX_PIN, HOST_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 }
 
 static void init_crsf_uart(void)
@@ -686,7 +701,7 @@ void app_main(void)
 {
     int64_t next_send_us = esp_timer_get_time();
 
-    init_usb_serial();
+    init_host_uart();
     init_crsf_uart();
     reset_telemetry_parser();
     reset_host_parser();

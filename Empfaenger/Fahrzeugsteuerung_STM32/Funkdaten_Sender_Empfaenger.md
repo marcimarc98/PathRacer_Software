@@ -4,31 +4,31 @@
 
 Aktueller Datenweg:
 
-- Die Windows-App `LenkradSenderApp` liest Lenkrad, Gas, Bremse und Buttons am PC.
+- Die Windows-App `Vehicle Ground Station` liest Lenkrad, Gas, Bremse und Buttons am PC.
 - Die App sendet ein festes Host-Paket per USB-Serial an den ESP32-Sender.
 - Der ESP32-Sender baut daraus ein CRSF-RC-Frame und gibt es an das ELRS-Sendermodul aus.
 - Der STM32 im Fahrzeug dekodiert das CRSF-RC-Frame und erzeugt Servo-, ESC-, Kamera- und Lichtsignale.
-- Der STM32 baut zusaetzlich ein CRSF-Telemetrie-Frame fuer den Rueckkanal.
+- Der STM32 baut zusaetzlich CRSF-Telemetrie fuer den Rueckkanal.
 - Der ESP32-Sender liest diese Rueckdaten wieder ein und gibt einen kompakten Status an die Windows-App zurueck.
 
 ## Pin-Belegung STM32
 
 Board:
 
-- NUCLEO-F303K8
+- `NUCLEO-F303K8`
 - MCU: `STM32F303K8T6`
 
 Aktiv verwendete Pins:
 
 | Funktion | STM32-Pin | Nucleo-Anschluss |
 |---|---|---|
-| Akku-ADC | `PA0` | `A0`, `CN4 Pin 1` |
+| Kamera PWM | `PA0` | `A0`, `CN4 Pin 1` |
 | Akku-Temp-ADC | `PA1` | `A1`, `CN4 Pin 2` |
+| Akku-ADC | `PA3` | `A2`, `CN4 Pin 3` |
 | CRSF RX vom ELRS-Empfaenger | `PA10` | `D0`, `CN3 Pin 2` |
 | CRSF TX zum ELRS-Empfaenger | `PA9` | `D1`, `CN3 Pin 1` |
 | Servo PWM | `PA6` | `A5`, `CN4 Pin 7` |
 | ESC PWM | `PA7` | `A6`, `CN4 Pin 6` |
-| Kamera PWM | `PA15` | `D10`, `CN3 Pin 5` |
 | Hauptlicht | `PB4` | `D12`, `CN4 Pin 14` |
 | Bremslicht | `PB5` | `D11`, `CN4 Pin 13` |
 | SWDIO | `PA13` | SWD Debug |
@@ -48,7 +48,7 @@ Die App sendet ein festes 11-Byte-Paket:
 | 8-9 | Buttons | `uint16`, little endian |
 | 10 | XOR-Checksumme | `uint8` |
 
-Reihenfolge ist fest:
+Feste Reihenfolge:
 
 ```text
 Lenkung -> Gas -> Bremse -> Buttons
@@ -79,7 +79,7 @@ Die Host-Buttons `2..7` werden aktuell nicht in die Fahrzeuglogik uebernommen.
 
 ## CRSF-Kanalbelegung
 
-Der ESP32-Sender erzeugt ein standardkonformes CRSF-RC-Frame mit 16 Kanaelen.
+Der ESP32-Sender erzeugt ein standardkonformes CRSF-RC-Frame mit 16 Kanaelen:
 
 | CRSF-Kanal | Inhalt |
 |---|---|
@@ -114,21 +114,23 @@ Die Buttons werden als gedrueckt erkannt, wenn der Kanalwert oberhalb der Mitte 
 
 Im aktuellen STM32-Stand sind implementiert:
 
-- CRSF Voll-Duplex auf `USART1` mit `416666 8N1`
+- CRSF Voll-Duplex auf `USART1`
 - Speichern des kompletten RC-Zustands im RAM
 - Servo-PWM auf `PA6`
 - ESC-PWM auf `PA7`
-- Kamera-PWM auf `PA15`
+- Kamera-PWM auf `PA0`
 - Hauptlichtausgang auf `PB4`
 - Bremslichtausgang auf `PB5`
-- Akku-Spannungsmessung per ADC auf `PA0`
+- Akku-Spannungsmessung per ADC auf `PA3`
 - Akku-Temperaturmessung per ADC auf `PA1`
 - zentrales Sensordatenmodul fuer Spannung und Temperatur
+- Akku-Spannung wird lokal ueber mehrere schnelle Messungen gemittelt und danach in den Rueckkanal gegeben
+- Akku-Temperatur wird direkt gemessen und nicht zusaetzlich gemittelt
 - Fahrstufen `R / N / D`
 - Sicherheits-Neutral ueber `PS`
 - Freigabe von `N` ueber `L1 + R1`
 - Umschalten zwischen `D` und `R` ueber die Shift-Paddles
-- Zeitfenster fuer die sichere Erkennung von `L1 + R1`
+- erneutes `L1 + R1` wird nach der Freigabe ignoriert
 - Fahrmodus `Normal / Sport`
 - in `Sport`: lineare Gas- und Lenkkennlinie
 - in `Normal`: progressive Gas- und progressive Lenkkennlinie
@@ -154,7 +156,6 @@ Schalten:
 - `Up Shift` -> `D`
 - `Down Shift` -> `R`
 - in `D` und `R` schalten die Paddles direkt zwischen den Fahrstufen
-- erneutes `L1 + R1` wird nach der Freigabe ignoriert
 - zurueck nach `N` geht nur noch ueber `PS`
 - `PS` -> sofortiges Sicherheits-`N`
 
@@ -196,9 +197,9 @@ Aktueller Textinhalt im `0x21 Flight Mode`-Frame:
 
 Beispiele:
 
-- `N|NORMAL|L0|C0`
-- `D|SPORT|L1|C0|T28`
-- `R|NORMAL|L1|C1|T31`
+- `N|NORMAL|L0|C0|T28`
+- `D|SPORT|L1|C0|T31`
+- `R|NORMAL|L1|C1|T34`
 
 Bedeutung:
 
@@ -212,8 +213,6 @@ Zusaetzlich sendet `0x08 Battery Sensor`:
 
 - Akku-Spannung
 - Akku-Restwert in Prozent
-
-Der ESP32-Sender liest diese Telemetrie wieder vom CRSF-Bus ein und sendet einen kompakten Status per USB-Serial an die Windows-App.
 
 ## Wichtige Stellschrauben im Code
 
@@ -238,9 +237,6 @@ Wichtige Konstanten:
 
 ## Relevante Code-Dateien
 
-- `Software/Sendestation/LenkradSenderApp/Form1.cs`
-- `Software/Sendestation/LenkradSenderApp/SenderService.cs`
-- `Software/Sendestation/Sendestation.ino`
 - `Core/Src/app.c`
 - `Core/Src/crsf_receiver.c`
 - `Core/Src/crsf_telemetry.c`

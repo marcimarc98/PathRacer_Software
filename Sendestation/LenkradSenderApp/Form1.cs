@@ -554,7 +554,7 @@ public partial class Form1 : Form
     {
         labelVehicleLinkValue.Text = telemetry.LinkActive ? "Aktiv" : "Inaktiv";
 
-        if (telemetry.LinkActive)
+        if (telemetry.VehicleStatusValid)
         {
             labelVehicleModeValue.Text = telemetry.SportMode ? "Sport" : "Normal";
             labelVehicleCameraValue.Text = telemetry.CameraRearActive ? "Hinten" : "Vorne";
