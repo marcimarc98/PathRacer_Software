@@ -1,0 +1,164 @@
+KnowHow ELRS
+=================
+
+Zielbild
+--------
+- Windows-App `Vehicle Ground Station` sendet Steuerdaten an den ESP32-S3.
+- ESP32-S3 wandelt diese in CRSF RC-Frames um und sendet sie an das ELRS-Sendermodul.
+- STM32 im Fahrzeug empfängt die RC-Daten über ELRS/CRSF und sendet Telemetrie zurück.
+- Die App zeigt diese Telemetrie über den ESP wieder an.
+
+Stabil funktionierend
+---------------------
+- App -> ESP Host-Schnittstelle läuft über den COM-/CH343-Pfad.
+- Auf dem ESP ist dafür zwingend `UART0` auf `GPIO43/44` korrekt.
+- App-Paketformat:
+  - `0xAA 0x55`
+  - Lenkung `int16 LE`
+  - Gas `uint16 LE`
+  - Bremse `uint16 LE`
+  - Buttons `uint16 LE`
+  - XOR
+- Aktuelle App-Achslogik:
+  - Lenkung = X
+  - Gas = RZ
+  - Bremse = Y
+- TX-Strecke funktioniert wieder stabil mit:
+  - ESP CRSF auf `GPIO17`
+  - `420000 Baud`
+  - `250 Hz`
+  - `COM11` auf App-Seite
+
+Wichtige ESP-Erkenntnisse
+-------------------------
+- Der größte frühere Fehler war nicht Telemetrie oder App-Format, sondern die falsche PC-Schnittstelle.
+- `usb_serial_jtag` war für dieses Projekt der falsche Weg.
+- Richtig ist:
+  - Host/App = `UART0`
+  - `GPIO43` TX
+  - `GPIO44` RX
+- Zusätzlich wichtig:
+  - Host-/Debug-Ausgabe darf den 250-Hz-Sendeloop nicht blockieren.
+  - Nicht-blockierende Host-Ausgabe war notwendig, damit `handset` stabil bleibt.
+
+STM32 aktuell korrekt
+---------------------
+- Kamera-PWM liegt jetzt auf `A0 / PA0`.
+- Akku-Temperatur liegt auf `A1 / PA1`.
+- Akku-Spannung liegt auf `A2 / PA3`.
+- Akku-Spannung wird lokal gemittelt, Temperatur nicht.
+- Die aktuelle N-/Freigabe-Logik ist bereits im normalen STM32-Projekt drin.
+
+STM32-Telemetrieformat
+----------------------
+Der STM32 sendet aktuell zwei relevante CRSF-Telemetrieframes:
+
+1. `0x21 Flight Mode`
+- Sendeintervall: `250 ms`
+- Payload als Text:
+  `<Gear>|<Mode>|L<0/1>|C<0/1>|T<degC>`
+- Beispiele:
+  - `N|NORMAL|L0|C0|T28`
+  - `D|SPORT|L1|C0|T31`
+  - `R|NORMAL|L1|C1|T34`
+- Bedeutung:
+  - Gear = `R`, `N`, `D`
+  - Mode = `NORMAL` oder `SPORT`
+  - `L` = Hauptlicht
+  - `C` = Kamera vorne/hinten
+  - `T` = Akku-Temperatur
+
+2. `0x08 Battery Sensor`
+- Sendeintervall: `5000 ms`
+- Enthält:
+  - Spannung
+  - Prozent
+
+Zusätzlich vom ELRS-/CRSF-System:
+- `0x14 Link Statistics`
+- ggf. `0x29 Device Info`
+
+App-Statuspaket vom ESP zur App
+-------------------------------
+- Header: `0x5A 0xA5`
+- Typ: `0x31`
+- Länge: `20 Bytes`
+- Wichtige Flags:
+  - `0x01` Link aktiv
+  - `0x02` Sportmodus
+  - `0x04` Licht an
+  - `0x08` Fahrzeugstatus gültig
+  - `0x10` Kamera hinten aktiv
+
+Bereits sauber bestätigt
+------------------------
+- App ist nicht der aktuelle Fehler.
+- STM32 ist nicht der aktuelle Fehler.
+- STM32 hat mit temporärem Debug bestätigt:
+  - `0x21` wird erfolgreich gesendet
+  - `0x08` wird erfolgreich gesendet
+  - kein lokaler Telemetrie-Sendefehler
+
+Fehlwege / Sackgassen
+---------------------
+1. Gesplitteter CRSF-Abgriff `GPIO17` TX + `GPIO18` RX ohne Hardware-Entkopplung
+- Ergebnis:
+  - gültige Frames gesehen
+  - aber nur `0x16`
+  - keine echten Telemetrie-Typen `0x21`, `0x08`, `0x14`
+- Schluss:
+  - nacktes Pin-Splitting ohne Entkopplung war nicht ausreichend
+
+2. Aggressive manuelle Umschaltung / GPIO-Matrix-Detach-Versuche im IDF
+- Ergebnis:
+  - häufig `no handset`
+- Schluss:
+  - TX-Strecke wurde dadurch instabil
+
+3. Ein-UART-Experimente mit getrenntem TX/RX auf 17/18
+- Ergebnis:
+  - Hinkanal teils stabil
+  - Rückkanal trotzdem nicht nutzbar
+
+4. Ein-Pin-Umschaltversuche auf `GPIO17` im IDF
+- Ergebnis:
+  - alter Arduino-Weg wurde bisher nicht 1:1 sauber getroffen
+  - entweder `no handset`
+  - oder stabiler Hinkanal, aber keine Rückbytes
+
+Aktueller Ein-Pin-Befund
+------------------------
+- Mit dem aktuell stabilen Ein-Pin-Stand auf `GPIO17` bleibt `handset` verbunden.
+- Aber am ESP kommen derzeit keine Rückbytes an:
+  - `rx=0`
+  - `frm=0`
+  - `fm=0`
+  - `bat=0`
+  - `ls=0`
+- Das heißt:
+  - Format passt
+  - App passt
+  - STM32 passt
+  - offene Restbaustelle ist nur noch:
+    echtes Half-Duplex-Empfangen auf Pin `17` im ESP-IDF
+
+Empfohlener Neustartpunkt
+-------------------------
+- App unverändert lassen.
+- STM32 unverändert lassen.
+- ESP neu von einer minimalen Ein-Pin-Arduino-Referenz oder minimalen IDF-Referenz aus aufbauen.
+- Erst wenn Rückbytes ankommen:
+  - dann Parser/Statuspaket erweitern oder feinjustieren
+- Nicht mehr zuerst an App, Statuslayout oder STM32 arbeiten.
+
+Dateien mit Referenzwert
+------------------------
+- Normales ESP-IDF-Projekt:
+  `Sendestation\\ESP32S3_IDF_Sendestation\\main\\main.c`
+- TX-only ESP-IDF-Referenz:
+  `Sendestation\\ESP32S3_IDF_Sendestation_TXOnly\\main\\main.c`
+- Alte Arduino-Referenz:
+  `Empfaenger\\Fahrzeugsteuerung_STM32\\Schnittstellendoku_Sender\\Sendestation.ino`
+- Normales STM32-Projekt:
+  `Empfaenger\\Fahrzeugsteuerung_STM32`
+
