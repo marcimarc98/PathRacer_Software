@@ -14,8 +14,7 @@
 #define UART_CRSF                   UART_NUM_1
 #define HOST_TX_PIN                 GPIO_NUM_43
 #define HOST_RX_PIN                 GPIO_NUM_44
-#define CRSF_TX_PIN                 GPIO_NUM_17
-#define CRSF_RX_PIN                 GPIO_NUM_18
+#define CRSF_DATA_PIN               GPIO_NUM_17
 
 #define HOST_BAUD                   460800U
 #define CRSF_BAUD                   420000U
@@ -462,20 +461,23 @@ static uint8_t gear_to_code(char gear)
     }
 }
 
-static void host_write_all(const void *data, size_t length)
+static void host_write_best_effort(const void *data, size_t length)
 {
-    const uint8_t *ptr = (const uint8_t *)data;
-    size_t remaining = length;
+    size_t free_size = 0U;
 
-    while (remaining > 0U) {
-        int written = uart_write_bytes(UART_HOST, ptr, remaining);
-        if (written <= 0) {
-            vTaskDelay(pdMS_TO_TICKS(1));
-            continue;
-        }
-        ptr += written;
-        remaining -= (size_t)written;
+    if ((data == NULL) || (length == 0U)) {
+        return;
     }
+
+    if (uart_get_tx_buffer_free_size(UART_HOST, &free_size) != ESP_OK) {
+        return;
+    }
+
+    if (free_size < length) {
+        return;
+    }
+
+    (void)uart_tx_chars(UART_HOST, (const char *)data, (uint32_t)length);
 }
 
 static void send_vehicle_status_to_host(void)
@@ -535,7 +537,7 @@ static void send_vehicle_status_to_host(void)
     }
     packet[19] = checksum;
 
-    host_write_all(packet, sizeof(packet));
+    host_write_best_effort(packet, sizeof(packet));
 }
 
 static void send_usb_debug_line(void)
@@ -569,7 +571,7 @@ static void send_usb_debug_line(void)
         (unsigned int)s_vehicle_status.battery_percent,
         (int)s_vehicle_status.battery_temp_c);
 
-    host_write_all(line, strlen(line));
+    host_write_best_effort(line, strlen(line));
 }
 
 static bool decode_host_packet(const uint8_t *packet, steuerdaten_t *out_state)
@@ -656,7 +658,7 @@ static void init_host_uart(void)
         .source_clk = UART_SCLK_DEFAULT,
     };
 
-    ESP_ERROR_CHECK(uart_driver_install(UART_HOST, 1024, 1024, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_driver_install(UART_HOST, 1024, 4096, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(UART_HOST, &cfg));
     ESP_ERROR_CHECK(uart_set_mode(UART_HOST, UART_MODE_UART));
     ESP_ERROR_CHECK(uart_set_pin(UART_HOST, HOST_TX_PIN, HOST_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
@@ -673,28 +675,20 @@ static void init_crsf_uart(void)
         .source_clk = UART_SCLK_DEFAULT,
     };
 
-    ESP_ERROR_CHECK(uart_driver_install(UART_CRSF, 1024, 1024, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_driver_install(UART_CRSF, 256, 1024, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(UART_CRSF, &cfg));
-    ESP_ERROR_CHECK(uart_set_mode(UART_CRSF, UART_MODE_UART));
-    ESP_ERROR_CHECK(uart_set_pin(UART_CRSF, CRSF_TX_PIN, CRSF_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-
-    gpio_set_pull_mode(CRSF_RX_PIN, GPIO_PULLUP_ONLY);
-    gpio_set_direction(CRSF_RX_PIN, GPIO_MODE_INPUT);
-
-    gpio_set_pull_mode(CRSF_TX_PIN, GPIO_PULLUP_ONLY);
-    gpio_set_direction(CRSF_TX_PIN, GPIO_MODE_INPUT);
+    ESP_ERROR_CHECK(uart_set_pin(UART_CRSF, CRSF_DATA_PIN, CRSF_DATA_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    ESP_ERROR_CHECK(uart_set_mode(UART_CRSF, UART_MODE_RS485_APP_CTRL));
+    ESP_ERROR_CHECK(uart_set_line_inverse(UART_CRSF, UART_SIGNAL_INV_DISABLE));
+    ESP_ERROR_CHECK(uart_set_rx_full_threshold(UART_CRSF, 1));
+    ESP_ERROR_CHECK(uart_set_rx_timeout(UART_CRSF, 2));
+    uart_set_always_rx_timeout(UART_CRSF, true);
 }
 
 static void send_crsf_frame(const uint8_t *frame, size_t length)
 {
-    gpio_set_direction(CRSF_TX_PIN, GPIO_MODE_OUTPUT);
-    gpio_set_level(CRSF_TX_PIN, 1);
-
     uart_write_bytes(UART_CRSF, frame, length);
     uart_wait_tx_done(UART_CRSF, pdMS_TO_TICKS(2));
-
-    gpio_set_level(CRSF_TX_PIN, 1);
-    gpio_set_direction(CRSF_TX_PIN, GPIO_MODE_INPUT);
 }
 
 void app_main(void)

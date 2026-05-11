@@ -8,7 +8,7 @@
 #define ESC_PWM_CHANNEL_COMPARE   TIM3->CCR2
 #define CAMERA_PWM_CHANNEL_COMPARE TIM2->CCR1
 #define CAMERA_PWM_FRONT_US       1100U
-#define CAMERA_PWM_REAR_US        1900U
+#define CAMERA_PWM_REAR_US        1500U
 
 static bool s_camera_rear_active = false;
 
