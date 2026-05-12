@@ -17,9 +17,11 @@ public partial class Form1 : Form
     private Label? _labelDownSnrValue;
     private Label? _labelRfProfileValue;
     private Label? _labelTxPowerValue;
+    private ThemedGroupBox _groupConnections = null!;
     private Label _labelWheelConnection = null!;
     private Button _buttonWheelStart = null!;
     private Button _buttonWheelStop = null!;
+    private string _probedWheelName = "Nicht verbunden";
 
     public Form1()
     {
@@ -31,14 +33,14 @@ public partial class Form1 : Form
         InitializeCockpitIcons();
         InitializeLinkQualityPanel();
         ApplyDebugVisibility();
-        labelVehicleControlsCaption.Text = "Steuerstatus";
-        labelVehicleControlsCaption.Visible = true;
-        labelVehicleControlsValue.Visible = true;
+        labelVehicleControlsCaption.Visible = false;
+        labelVehicleControlsValue.Visible = false;
 
         _senderService.StatusMessage += HandleStatusMessage;
         RefreshComPorts();
         ProbeWheel();
         AppendStatus("App bereit.");
+        UpdateStatus();
 
         _statusTimer.Interval = 200;
         _statusTimer.Tick += (_, _) => UpdateStatus();
@@ -153,9 +155,10 @@ public partial class Form1 : Form
             ForeColor = Color.FromArgb(40, 48, 58),
             Font = new Font("Segoe UI", 12F, FontStyle.Regular, GraphicsUnit.Point, 0),
             Text =
-                "L1 + R1: Fahrstufe aus N freigeben" + Environment.NewLine +
+                "L1 + R1 halten und einmal D/R waehlen: Fahrgasse aktiv" + Environment.NewLine +
                 "Up Shift: D" + Environment.NewLine +
                 "Down Shift: R" + Environment.NewLine +
+                "Danach D/R ohne erneute Freigabe umschaltbar" + Environment.NewLine +
                 "PS: Sicherheits-N" + Environment.NewLine +
                 "L2: Fahrmodus Normal/Sport" + Environment.NewLine +
                 "R2: Kamera vorne/hinten" + Environment.NewLine +
@@ -184,55 +187,81 @@ public partial class Form1 : Form
 
     private void InitializeConnectionHeader()
     {
+        _groupConnections = new ThemedGroupBox
+        {
+            Name = "groupConnections",
+            Text = "Verbindungen",
+            Location = new Point(18, 32),
+            Size = new Size(790, 66),
+            BackColor = Color.FromArgb(252, 253, 255),
+            ForeColor = Color.FromArgb(36, 42, 50),
+            Anchor = AnchorStyles.Top | AnchorStyles.Left
+        };
+
         _labelWheelConnection = new Label
         {
             AutoSize = true,
-            Location = new Point(18, 44),
+            Location = new Point(18, 28),
             Name = "labelWheelConnection",
-            Text = "Lenkrad"
+            Size = new Size(52, 15),
+            Text = "Lenkrad:"
         };
 
         _buttonWheelStart = new Button
         {
-            Location = new Point(18, 61),
+            Location = new Point(84, 24),
             Name = "buttonWheelStart",
-            Size = new Size(120, 25),
-            Text = "Lenkrad Start",
+            Size = new Size(82, 26),
+            Text = "Start",
             UseVisualStyleBackColor = true
         };
         _buttonWheelStart.Click += buttonWheelStart_Click;
 
         _buttonWheelStop = new Button
         {
-            Location = new Point(148, 61),
+            Location = new Point(174, 24),
             Name = "buttonWheelStop",
-            Size = new Size(120, 25),
-            Text = "Lenkrad Stop",
+            Size = new Size(82, 26),
+            Text = "Stop",
             UseVisualStyleBackColor = true
         };
         _buttonWheelStop.Click += buttonWheelStop_Click;
 
-        labelPort.Text = "ESP-COM-Port";
-        labelPort.Location = new Point(292, 44);
-        comboPorts.Location = new Point(292, 62);
-        buttonRefreshPorts.Location = new Point(452, 61);
-        buttonStart.Location = new Point(558, 61);
-        buttonStart.Size = new Size(115, 25);
-        buttonStart.Text = "ESP verbinden";
-        buttonStop.Location = new Point(688, 61);
-        buttonStop.Size = new Size(105, 25);
-        buttonStop.Text = "ESP trennen";
+        labelPort.Text = "ESP32:";
+        labelPort.Location = new Point(304, 28);
+        comboPorts.Location = new Point(358, 25);
+        comboPorts.Size = new Size(125, 23);
+        buttonRefreshPorts.Location = new Point(492, 24);
+        buttonRefreshPorts.Size = new Size(74, 26);
+        buttonRefreshPorts.Text = "Ports";
+        buttonStart.Location = new Point(578, 24);
+        buttonStart.Size = new Size(96, 26);
+        buttonStart.Text = "Verbinden";
+        buttonStop.Location = new Point(682, 24);
+        buttonStop.Size = new Size(82, 26);
+        buttonStop.Text = "Trennen";
 
         labelSenderCaption.Text = "ESP:";
         labelPacketsCaption.Text = "ESP-Pakete:";
         labelStateCaption.Text = "Status:";
 
-        Controls.Add(_labelWheelConnection);
-        Controls.Add(_buttonWheelStart);
-        Controls.Add(_buttonWheelStop);
-        _labelWheelConnection.BringToFront();
-        _buttonWheelStart.BringToFront();
-        _buttonWheelStop.BringToFront();
+        Controls.Remove(labelPort);
+        Controls.Remove(comboPorts);
+        Controls.Remove(buttonRefreshPorts);
+        Controls.Remove(buttonStart);
+        Controls.Remove(buttonStop);
+
+        _groupConnections.Controls.Add(_labelWheelConnection);
+        _groupConnections.Controls.Add(_buttonWheelStart);
+        _groupConnections.Controls.Add(_buttonWheelStop);
+        _groupConnections.Controls.Add(labelPort);
+        _groupConnections.Controls.Add(comboPorts);
+        _groupConnections.Controls.Add(buttonRefreshPorts);
+        _groupConnections.Controls.Add(buttonStart);
+        _groupConnections.Controls.Add(buttonStop);
+
+        Controls.Add(_groupConnections);
+        _groupConnections.BringToFront();
     }
 
     private void buttonWheelStart_Click(object? sender, EventArgs e)
@@ -616,11 +645,9 @@ public partial class Form1 : Form
 
     private void UpdateStatus()
     {
-        _senderService.RefreshLocalPreview();
-
         labelWheelValue.Text = _senderService.IsWheelRunning
             ? $"{_senderService.WheelName} (aktiv)"
-            : _senderService.WheelName;
+            : _probedWheelName;
         labelSenderValue.Text = _senderService.IsEspConnected ? "Verbunden" : "Getrennt";
         labelPacketsValue.Text = _senderService.PacketCount.ToString();
         labelStateValue.Text = _senderService.StatusText;
@@ -656,10 +683,6 @@ public partial class Form1 : Form
             'D' => Color.RoyalBlue,
             _ => Color.DimGray,
         };
-        labelVehicleControlsValue.Text =
-            $"Freigabe: {(control.NeutralUnlocked ? "Aktiv" : "Gesperrt")}   |   " +
-            $"Lichthupe: {(control.FlashActive ? "Aktiv" : "Aus")}";
-
         if (_labelUpLqValue is not null)
         {
             _labelUpLqValue.Text = $"{telemetry.UplinkLq} %";
@@ -694,12 +717,14 @@ public partial class Form1 : Form
             if (string.IsNullOrWhiteSpace(wheelName))
             {
                 AppendStatus("Kein Lenkrad gefunden.");
-                labelWheelValue.Text = "Nicht gefunden";
+                _probedWheelName = "Nicht gefunden";
+                labelWheelValue.Text = _probedWheelName;
                 return;
             }
 
             AppendStatus($"Lenkrad gefunden: {wheelName}");
-            labelWheelValue.Text = wheelName;
+            _probedWheelName = wheelName;
+            labelWheelValue.Text = _probedWheelName;
         }
         catch (Exception ex)
         {
@@ -742,5 +767,30 @@ public partial class Form1 : Form
         textStatusLog.SelectionStart = textStatusLog.TextLength;
         textStatusLog.ScrollToCaret();
     }
-}
 
+    private sealed class ThemedGroupBox : GroupBox
+    {
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.Clear(Parent?.BackColor ?? BackColor);
+
+            var textSize = TextRenderer.MeasureText(Text, Font);
+            var borderTop = Math.Max(8, textSize.Height / 2);
+            var borderRect = Rectangle.FromLTRB(0, borderTop, Width - 1, Height - 1);
+
+            using (var path = CreateRoundedRectanglePath(borderRect, 10f))
+            using (var fillBrush = new SolidBrush(BackColor))
+            using (var borderPen = new Pen(Color.FromArgb(54, 82, 124), 1.8f))
+            {
+                e.Graphics.FillPath(fillBrush, path);
+                e.Graphics.DrawPath(borderPen, path);
+            }
+
+            var textBounds = new Rectangle(10, 0, textSize.Width + 8, textSize.Height);
+            using var textBackBrush = new SolidBrush(Parent?.BackColor ?? BackColor);
+            e.Graphics.FillRectangle(textBackBrush, textBounds);
+            TextRenderer.DrawText(e.Graphics, Text, Font, new Point(14, 0), ForeColor);
+        }
+    }
+}

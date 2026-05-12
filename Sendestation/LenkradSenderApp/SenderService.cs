@@ -494,6 +494,7 @@ public sealed class SenderService : IDisposable
             var l1Falling = !l1Pressed && _localControlState.PrevL1Pressed;
             var r1Falling = !r1Pressed && _localControlState.PrevR1Pressed;
             var psRising = psPressed && !_localControlState.PrevPsPressed;
+            var comboHeld = l1Pressed && r1Pressed;
 
             if (!l1Pressed && !r1Pressed)
             {
@@ -512,13 +513,8 @@ public sealed class SenderService : IDisposable
                 _localControlState.R1Pending = true;
             }
 
-            if (!_localControlState.ComboLatched && l1Pressed && r1Pressed)
+            if (comboHeld)
             {
-                if ((_localControlState.Gear == 'N') && !_localControlState.NeutralUnlocked)
-                {
-                    _localControlState.NeutralUnlocked = true;
-                }
-
                 _localControlState.ComboLatched = true;
                 _localControlState.L1Pending = false;
                 _localControlState.R1Pending = false;
@@ -538,19 +534,24 @@ public sealed class SenderService : IDisposable
             if (psRising)
             {
                 _localControlState.Gear = 'N';
+                _localControlState.ShiftGateActive = false;
                 _localControlState.NeutralUnlocked = false;
             }
-            else if (_localControlState.NeutralUnlocked)
+            else if (comboHeld || _localControlState.ShiftGateActive)
             {
                 if (upShiftRising)
                 {
                     _localControlState.Gear = 'D';
+                    _localControlState.ShiftGateActive = true;
                 }
                 else if (downShiftRising)
                 {
                     _localControlState.Gear = 'R';
+                    _localControlState.ShiftGateActive = true;
                 }
             }
+
+            _localControlState.NeutralUnlocked = comboHeld || _localControlState.ShiftGateActive;
 
             if (l2Rising)
             {
@@ -957,6 +958,7 @@ public sealed class SenderService : IDisposable
         public bool CameraRearActive { get; set; }
         public bool MainLightOn { get; set; }
         public bool FlashActive { get; set; }
+        public bool ShiftGateActive { get; set; }
         public bool PrevDownShiftPressed { get; set; }
         public bool PrevUpShiftPressed { get; set; }
         public bool PrevR2Pressed { get; set; }
