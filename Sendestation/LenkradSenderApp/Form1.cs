@@ -17,18 +17,23 @@ public partial class Form1 : Form
     private Label? _labelDownSnrValue;
     private Label? _labelRfProfileValue;
     private Label? _labelTxPowerValue;
+    private Label _labelWheelConnection = null!;
+    private Button _buttonWheelStart = null!;
+    private Button _buttonWheelStop = null!;
 
     public Form1()
     {
         InitializeComponent();
+        InitializeConnectionHeader();
         SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
         UpdateStyles();
         ApplyWindowIcon();
         InitializeCockpitIcons();
         InitializeLinkQualityPanel();
         ApplyDebugVisibility();
-        labelVehicleControlsCaption.Visible = false;
-        labelVehicleControlsValue.Visible = false;
+        labelVehicleControlsCaption.Text = "Steuerstatus";
+        labelVehicleControlsCaption.Visible = true;
+        labelVehicleControlsValue.Visible = true;
 
         _senderService.StatusMessage += HandleStatusMessage;
         RefreshComPorts();
@@ -175,6 +180,82 @@ public partial class Form1 : Form
     private void buttonRefreshPorts_Click(object sender, EventArgs e)
     {
         RefreshComPorts();
+    }
+
+    private void InitializeConnectionHeader()
+    {
+        _labelWheelConnection = new Label
+        {
+            AutoSize = true,
+            Location = new Point(18, 44),
+            Name = "labelWheelConnection",
+            Text = "Lenkrad"
+        };
+
+        _buttonWheelStart = new Button
+        {
+            Location = new Point(18, 61),
+            Name = "buttonWheelStart",
+            Size = new Size(120, 25),
+            Text = "Lenkrad Start",
+            UseVisualStyleBackColor = true
+        };
+        _buttonWheelStart.Click += buttonWheelStart_Click;
+
+        _buttonWheelStop = new Button
+        {
+            Location = new Point(148, 61),
+            Name = "buttonWheelStop",
+            Size = new Size(120, 25),
+            Text = "Lenkrad Stop",
+            UseVisualStyleBackColor = true
+        };
+        _buttonWheelStop.Click += buttonWheelStop_Click;
+
+        labelPort.Text = "ESP-COM-Port";
+        labelPort.Location = new Point(292, 44);
+        comboPorts.Location = new Point(292, 62);
+        buttonRefreshPorts.Location = new Point(452, 61);
+        buttonStart.Location = new Point(558, 61);
+        buttonStart.Size = new Size(115, 25);
+        buttonStart.Text = "ESP verbinden";
+        buttonStop.Location = new Point(688, 61);
+        buttonStop.Size = new Size(105, 25);
+        buttonStop.Text = "ESP trennen";
+
+        labelSenderCaption.Text = "ESP:";
+        labelPacketsCaption.Text = "ESP-Pakete:";
+        labelStateCaption.Text = "Status:";
+
+        Controls.Add(_labelWheelConnection);
+        Controls.Add(_buttonWheelStart);
+        Controls.Add(_buttonWheelStop);
+        _labelWheelConnection.BringToFront();
+        _buttonWheelStart.BringToFront();
+        _buttonWheelStop.BringToFront();
+    }
+
+    private void buttonWheelStart_Click(object? sender, EventArgs e)
+    {
+        try
+        {
+            _senderService.StartWheel();
+            AppendStatus("Lenkrad gestartet.");
+        }
+        catch (Exception ex)
+        {
+            AppendStatus($"Lenkrad-Start fehlgeschlagen: {ex.Message}");
+            MessageBox.Show(this, ex.Message, "Lenkrad-Start fehlgeschlagen");
+        }
+
+        UpdateStatus();
+    }
+
+    private void buttonWheelStop_Click(object? sender, EventArgs e)
+    {
+        _senderService.StopWheel();
+        AppendStatus("Lenkrad gestoppt.");
+        UpdateStatus();
     }
 
     private void InitializeCockpitIcons()
@@ -491,14 +572,14 @@ public partial class Form1 : Form
 
         try
         {
-            _senderService.Start(portName);
+            _senderService.ConnectEsp(portName);
 
-            AppendStatus($"Senden gestartet auf {portName}.");
+            AppendStatus($"ESP verbunden auf {portName}.");
         }
         catch (Exception ex)
         {
-            AppendStatus($"Start fehlgeschlagen: {ex.Message}");
-            MessageBox.Show(this, ex.Message, "Start fehlgeschlagen");
+            AppendStatus($"ESP-Verbindung fehlgeschlagen: {ex.Message}");
+            MessageBox.Show(this, ex.Message, "ESP-Verbindung fehlgeschlagen");
         }
 
         UpdateStatus();
@@ -506,8 +587,8 @@ public partial class Form1 : Form
 
     private void buttonStop_Click(object sender, EventArgs e)
     {
-        _senderService.Stop();
-        AppendStatus("Senden gestoppt.");
+        _senderService.DisconnectEsp();
+        AppendStatus("ESP getrennt.");
         UpdateStatus();
     }
 
@@ -535,74 +616,60 @@ public partial class Form1 : Form
 
     private void UpdateStatus()
     {
-        labelWheelValue.Text = _senderService.WheelName;
-        labelSenderValue.Text = _senderService.IsRunning ? "Aktiv" : "Inaktiv";
+        _senderService.RefreshLocalPreview();
+
+        labelWheelValue.Text = _senderService.IsWheelRunning
+            ? $"{_senderService.WheelName} (aktiv)"
+            : _senderService.WheelName;
+        labelSenderValue.Text = _senderService.IsEspConnected ? "Verbunden" : "Getrennt";
         labelPacketsValue.Text = _senderService.PacketCount.ToString();
         labelStateValue.Text = _senderService.StatusText;
         var telemetry = _senderService.LastTelemetry;
         labelSteeringLiveValue.Text = telemetry.SteeringRaw.ToString();
         labelGasLiveValue.Text = telemetry.GasRaw.ToString();
         labelBrakeLiveValue.Text = telemetry.BrakeRaw.ToString();
-        UpdateVehicleStatus(_senderService.LastVehicleTelemetry);
+        UpdateVehicleStatus(_senderService.LastControlState, _senderService.LastVehicleTelemetry);
 
-        buttonStart.Enabled = !_senderService.IsRunning;
-        buttonStop.Enabled = _senderService.IsRunning;
-        comboPorts.Enabled = !_senderService.IsRunning;
+        buttonStart.Enabled = !_senderService.IsEspConnected;
+        buttonStop.Enabled = _senderService.IsEspConnected;
+        buttonRefreshPorts.Enabled = !_senderService.IsEspConnected;
+        comboPorts.Enabled = !_senderService.IsEspConnected;
+        _buttonWheelStart.Enabled = !_senderService.IsWheelRunning;
+        _buttonWheelStop.Enabled = _senderService.IsWheelRunning;
     }
 
-    private void UpdateVehicleStatus(SenderService.VehicleTelemetrySnapshot telemetry)
+    private void UpdateVehicleStatus(SenderService.ControlStateSnapshot control, SenderService.VehicleTelemetrySnapshot telemetry)
     {
         labelVehicleLinkValue.Text = telemetry.LinkActive ? "Aktiv" : "Inaktiv";
-
-        if (telemetry.VehicleStatusValid)
+        labelVehicleModeValue.Text = control.SportMode ? "Sport" : "Normal";
+        labelVehicleCameraValue.Text = control.CameraRearActive ? "Hinten" : "Vorne";
+        labelVehicleLightValue.Text = control.FlashActive
+            ? (control.MainLightOn ? "Ein + Lichthupe" : "Lichthupe")
+            : (control.MainLightOn ? "Ein" : "Aus");
+        labelVehicleBatteryValue.Text = telemetry.BatteryMv > 0 ? $"{telemetry.BatteryPercent} %" : "--";
+        labelVehicleTempValue.Text = telemetry.VehicleStatusValid ? $"{telemetry.BatteryTempC} °C" : "--";
+        labelGearValue.Text = control.Gear.ToString();
+        labelGearValue.ForeColor = control.Gear switch
         {
-            labelVehicleModeValue.Text = telemetry.SportMode ? "Sport" : "Normal";
-            labelVehicleCameraValue.Text = telemetry.CameraRearActive ? "Hinten" : "Vorne";
-            labelVehicleLightValue.Text = telemetry.MainLightOn ? "Ein" : "Aus";
-            labelVehicleBatteryValue.Text = telemetry.BatteryMv > 0 ? $"{telemetry.BatteryPercent} %" : "--";
-            labelVehicleTempValue.Text = telemetry.BatteryMv > 0 ? $"{telemetry.BatteryTempC} °C" : "--";
-            labelGearValue.Text = telemetry.Gear.ToString();
-            labelGearValue.ForeColor = telemetry.Gear switch
-            {
-                'R' => Color.Firebrick,
-                'N' => Color.ForestGreen,
-                'D' => Color.RoyalBlue,
-                _ => Color.DimGray,
-            };
+            'R' => Color.Firebrick,
+            'N' => Color.ForestGreen,
+            'D' => Color.RoyalBlue,
+            _ => Color.DimGray,
+        };
+        labelVehicleControlsValue.Text =
+            $"Freigabe: {(control.NeutralUnlocked ? "Aktiv" : "Gesperrt")}   |   " +
+            $"Lichthupe: {(control.FlashActive ? "Aktiv" : "Aus")}";
 
-            if (_labelUpLqValue is not null)
-            {
-                _labelUpLqValue.Text = $"{telemetry.UplinkLq} %";
-                _labelUpRssiValue!.Text = FormatRssi(telemetry.UplinkRssi);
-                _labelUpSnrValue!.Text = FormatSnr(telemetry.UplinkSnr);
-                _labelDownLqValue!.Text = $"{telemetry.DownlinkLq} %";
-                _labelDownRssiValue!.Text = FormatRssi(telemetry.DownlinkRssi);
-                _labelDownSnrValue!.Text = FormatSnr(telemetry.DownlinkSnr);
-                _labelRfProfileValue!.Text = FormatRfProfile(telemetry.RfProfile);
-                _labelTxPowerValue!.Text = FormatTxPower(telemetry.TxPower);
-            }
-        }
-        else
+        if (_labelUpLqValue is not null)
         {
-            labelVehicleModeValue.Text = "--";
-            labelVehicleCameraValue.Text = "--";
-            labelVehicleLightValue.Text = "--";
-            labelVehicleBatteryValue.Text = "--";
-            labelVehicleTempValue.Text = "--";
-            labelGearValue.Text = "-";
-            labelGearValue.ForeColor = Color.DimGray;
-
-            if (_labelUpLqValue is not null)
-            {
-                _labelUpLqValue.Text = "--";
-                _labelUpRssiValue!.Text = "--";
-                _labelUpSnrValue!.Text = "--";
-                _labelDownLqValue!.Text = "--";
-                _labelDownRssiValue!.Text = "--";
-                _labelDownSnrValue!.Text = "--";
-                _labelRfProfileValue!.Text = "--";
-                _labelTxPowerValue!.Text = "--";
-            }
+            _labelUpLqValue.Text = $"{telemetry.UplinkLq} %";
+            _labelUpRssiValue!.Text = FormatRssi(telemetry.UplinkRssi);
+            _labelUpSnrValue!.Text = FormatSnr(telemetry.UplinkSnr);
+            _labelDownLqValue!.Text = $"{telemetry.DownlinkLq} %";
+            _labelDownRssiValue!.Text = FormatRssi(telemetry.DownlinkRssi);
+            _labelDownSnrValue!.Text = FormatSnr(telemetry.DownlinkSnr);
+            _labelRfProfileValue!.Text = FormatRfProfile(telemetry.RfProfile);
+            _labelTxPowerValue!.Text = FormatTxPower(telemetry.TxPower);
         }
 
         var debug = _senderService.LastDebugTelemetry;

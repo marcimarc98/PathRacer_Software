@@ -26,7 +26,7 @@ static void app_run_control_cycle(void)
   if (rc_state_signal_is_recent(&rc_state, now_ms, RC_SIGNAL_TIMEOUT_MS))
   {
     lights_control_step(&rc_state, now_ms, &lights_state);
-    vehicle_control_step(&rc_state, lights_state.shift_combo_edge, &vehicle_command);
+    vehicle_control_step(&rc_state, &vehicle_command);
     drive_pwm_apply(vehicle_command.lenkung_us, vehicle_command.esc_us, vehicle_command.camera_rear_active);
   }
   else
@@ -39,11 +39,6 @@ static void app_run_control_cycle(void)
     drive_pwm_apply_failsafe();
   }
 
-  telemetry_status.gear = vehicle_command.gear;
-  telemetry_status.drive_mode = vehicle_command.drive_mode;
-  telemetry_status.neutral_locked = vehicle_command.neutral_locked;
-  telemetry_status.camera_rear_active = vehicle_command.camera_rear_active;
-  telemetry_status.main_light_on = lights_state.main_light_on;
   telemetry_status.battery_mv = sensor_status.battery_mv;
   telemetry_status.battery_percent = sensor_status.battery_percent;
   telemetry_status.battery_temp_c = sensor_status.battery_temp_c;

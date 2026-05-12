@@ -58,6 +58,14 @@ static constexpr uint8_t STATUS_HEADER_2 = 0xA5;
 static constexpr uint8_t STATUS_PACKET_TYPE = 0x31;
 static constexpr size_t STATUS_PACKET_SIZE = 20;
 
+static constexpr int LOGICAL_BUTTON_REVERSE = 0;
+static constexpr int LOGICAL_BUTTON_DRIVE = 1;
+static constexpr int LOGICAL_BUTTON_CAMERA_REAR = 2;
+static constexpr int LOGICAL_BUTTON_SPORT = 3;
+static constexpr int LOGICAL_BUTTON_FLASH = 4;
+static constexpr int LOGICAL_BUTTON_MAIN_LIGHT = 5;
+static constexpr int LOGICAL_BUTTON_NEUTRAL_UNLOCKED = 6;
+
 // --------------------------------------------------
 // Structs
 // --------------------------------------------------
@@ -237,6 +245,42 @@ static uint16_t channelValueForButton(const Steuerdaten *state, int button_index
     return boolToCRSF(state->button[button_index]);
 }
 
+static bool logicalButtonActive(int button_index)
+{
+    if ((button_index < 0) || (button_index >= 13)) {
+        return false;
+    }
+
+    return s_state.button[button_index];
+}
+
+static char commandedGear()
+{
+    const bool reverse_selected = logicalButtonActive(LOGICAL_BUTTON_REVERSE);
+    const bool drive_selected = logicalButtonActive(LOGICAL_BUTTON_DRIVE);
+
+    if (reverse_selected == drive_selected) {
+        return 'N';
+    }
+
+    return reverse_selected ? 'R' : 'D';
+}
+
+static bool commandedSportMode()
+{
+    return logicalButtonActive(LOGICAL_BUTTON_SPORT);
+}
+
+static bool commandedMainLight()
+{
+    return logicalButtonActive(LOGICAL_BUTTON_MAIN_LIGHT);
+}
+
+static bool commandedCameraRear()
+{
+    return logicalButtonActive(LOGICAL_BUTTON_CAMERA_REAR);
+}
+
 // --------------------------------------------------
 // CRSF Send / Listen Mode
 // --------------------------------------------------
@@ -282,11 +326,11 @@ static void fillChannels(uint16_t ch[CRSF_NUM_CHANNELS])
 
     ch[3] = channelValueForButton(&s_state, 0);
     ch[4] = channelValueForButton(&s_state, 1);
-    ch[5] = channelValueForButton(&s_state, 8);
-    ch[6] = channelValueForButton(&s_state, 9);
-    ch[7] = channelValueForButton(&s_state, 10);
-    ch[8] = channelValueForButton(&s_state, 11);
-    ch[9] = channelValueForButton(&s_state, 12);
+    ch[5] = channelValueForButton(&s_state, 2);
+    ch[6] = channelValueForButton(&s_state, 3);
+    ch[7] = channelValueForButton(&s_state, 4);
+    ch[8] = channelValueForButton(&s_state, 5);
+    ch[9] = channelValueForButton(&s_state, 6);
 
     for (int i = 10; i < CRSF_NUM_CHANNELS; ++i) {
         ch[i] = UNUSED_BUTTON_CHANNEL_VALUE;
@@ -373,6 +417,14 @@ static void parseFlightModePayload(const uint8_t *payload, size_t payload_length
 
     memcpy(mode_text, payload, copy_len);
     mode_text[copy_len] = '\0';
+
+    if (sscanf(mode_text, "T%d", &battery_temp_c) == 1) {
+        s_vehicle_status.valid = true;
+        s_vehicle_status.battery_temp_c = (int16_t)battery_temp_c;
+        s_vehicle_status.last_update_ms = millis_now();
+        s_vehicle_status.last_link_activity_ms = millis_now();
+        return;
+    }
 
     int parsed = sscanf(
         mode_text,
@@ -581,7 +633,6 @@ static void sendVehicleStatusToHost()
     bool link_active = (now_ms - s_vehicle_status.last_link_activity_ms) <= STATUS_VALID_MS;
     bool vehicle_status_valid = s_vehicle_status.valid &&
                                 ((now_ms - s_vehicle_status.last_update_ms) <= STATUS_VALID_MS);
-
     if ((now_ms - last_status_ms) < STATUS_PERIOD_MS) {
         return;
     }
@@ -589,16 +640,16 @@ static void sendVehicleStatusToHost()
     last_status_ms = now_ms;
 
     if (link_active) flags |= 0x01;
-    if (s_vehicle_status.sport_mode) flags |= 0x02;
-    if (s_vehicle_status.main_light_on) flags |= 0x04;
+    if (commandedSportMode()) flags |= 0x02;
+    if (commandedMainLight()) flags |= 0x04;
     if (vehicle_status_valid) flags |= 0x08;
-    if (s_vehicle_status.camera_rear_active) flags |= 0x10;
+    if (commandedCameraRear()) flags |= 0x10;
 
     packet[0] = STATUS_HEADER_1;
     packet[1] = STATUS_HEADER_2;
     packet[2] = STATUS_PACKET_TYPE;
     packet[3] = flags;
-    packet[4] = gearToCode(s_vehicle_status.gear);
+    packet[4] = gearToCode(commandedGear());
     packet[5] = s_vehicle_status.battery_percent;
 
     packet[6] = (uint8_t)(s_vehicle_status.battery_mv & 0xFF);
@@ -660,7 +711,7 @@ static void sendDebugLine()
         (unsigned long)s_debug_stats.device_info_frames_seen,
         (unsigned int)s_debug_stats.last_telemetry_type,
         s_vehicle_status.valid ? 1U : 0U,
-        s_vehicle_status.gear,
+        commandedGear(),
         (unsigned int)s_vehicle_status.battery_mv,
         (unsigned int)s_vehicle_status.battery_percent,
         (int)s_vehicle_status.battery_temp_c,

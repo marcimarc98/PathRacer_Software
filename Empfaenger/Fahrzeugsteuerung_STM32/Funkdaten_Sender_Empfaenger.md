@@ -63,19 +63,18 @@ Feste Zuordnung in der App:
 - `Axis RZ` = Gas
 - `Button 0..12` = Host-Buttons
 
-Aktiv fuer die Fahrzeuglogik werden nur diese Buttons genutzt:
+Die App verarbeitet die physischen Lenkrad-Buttons lokal zu fertigen Soll-Zustaenden.
+An ESP32 und STM32 gehen nur noch diese logischen Zustandsbits:
 
-| Receiver-Button | Host-Button | Funktion |
+| Receiver-Button | Host-Bit | Funktion |
 |---|---|---|
-| 0 | 0 | Down Shift |
-| 1 | 1 | Up Shift |
-| 2 | 8 | R2 |
-| 3 | 9 | L2 |
-| 4 | 10 | L1 |
-| 5 | 11 | R1 |
-| 6 | 12 | PS |
-
-Die Host-Buttons `2..7` werden aktuell nicht in die Fahrzeuglogik uebernommen.
+| 0 | 0 | Sollzustand Rueckwaerts |
+| 1 | 1 | Sollzustand Vorwaerts |
+| 2 | 2 | Kamera hinten aktiv |
+| 3 | 3 | Sportmodus aktiv |
+| 4 | 4 | Lichthupe aktiv |
+| 5 | 5 | Hauptlicht ein |
+| 6 | 6 | Neutral freigegeben |
 
 ## CRSF-Kanalbelegung
 
@@ -86,13 +85,13 @@ Der ESP32-Sender erzeugt ein standardkonformes CRSF-RC-Frame mit 16 Kanaelen:
 | CH1 / Index 0 | Lenkung |
 | CH2 / Index 1 | Gas |
 | CH3 / Index 2 | Bremse |
-| CH4 / Index 3 | Receiver-Button 0 = Down Shift |
-| CH5 / Index 4 | Receiver-Button 1 = Up Shift |
-| CH6 / Index 5 | Receiver-Button 2 = R2 |
-| CH7 / Index 6 | Receiver-Button 3 = L2 |
-| CH8 / Index 7 | Receiver-Button 4 = L1 |
-| CH9 / Index 8 | Receiver-Button 5 = R1 |
-| CH10 / Index 9 | Receiver-Button 6 = PS |
+| CH4 / Index 3 | Sollzustand Rueckwaerts |
+| CH5 / Index 4 | Sollzustand Vorwaerts |
+| CH6 / Index 5 | Kamera hinten aktiv |
+| CH7 / Index 6 | Sportmodus aktiv |
+| CH8 / Index 7 | Lichthupe aktiv |
+| CH9 / Index 8 | Hauptlicht ein |
+| CH10 / Index 9 | Neutral freigegeben |
 | CH11..CH16 | unbenutzt |
 
 Buttons werden digital uebertragen:
@@ -126,54 +125,32 @@ Im aktuellen STM32-Stand sind implementiert:
 - zentrales Sensordatenmodul fuer Spannung und Temperatur
 - Akku-Spannung wird lokal ueber mehrere schnelle Messungen gemittelt und danach in den Rueckkanal gegeben
 - Akku-Temperatur wird direkt gemessen und nicht zusaetzlich gemittelt
-- Fahrstufen `R / N / D`
-- Sicherheits-Neutral ueber `PS`
-- Freigabe von `N` ueber `L1 + R1`
-- Umschalten zwischen `D` und `R` ueber die Shift-Paddles
-- erneutes `L1 + R1` wird nach der Freigabe ignoriert
-- Fahrmodus `Normal / Sport`
+- zustandsgetriebene Fahrstufen `R / N / D`
+- zustandsgetriebener Fahrmodus `Normal / Sport`
 - in `Sport`: lineare Gas- und Lenkkennlinie
 - in `Normal`: progressive Gas- und progressive Lenkkennlinie
 - Rueckwaerts-Geschwindigkeitslimit
-- Kameraumschaltung mit `R2`
+- zustandsgetriebene Kamera vorne/hinten
 - invertierte Lenkung bei aktiver Rueckfahrkamera
-- `R1` tippen: Hauptlicht ein/aus
-- `L1` tippen: Lichthupe
+- zustandsgetriebenes Hauptlicht
+- zustandsgetriebene Lichthupe
 - Bremslicht aktiv bei gedrueckter Bremse
 - Failsafe nach `500 ms`
+- Sicherheitslogik fuer den Antrieb bleibt lokal im STM32
 
 ## Bedienung
 
-Startzustand:
+Die App verarbeitet die physische Bedienung lokal und sendet nur fertige Soll-Zustaende.
+Der STM32 setzt diese Zustande direkt um und behaelt nur die Sicherheitslogik fuer den Antrieb:
 
-- Fahrzeug startet in `N`
-- `N` ist verriegelt
-- ESC bekommt Neutral
-
-Schalten:
-
-- `L1 + R1` innerhalb des Zeitfensters -> `N` freigeben
-- `Up Shift` -> `D`
-- `Down Shift` -> `R`
-- in `D` und `R` schalten die Paddles direkt zwischen den Fahrstufen
-- zurueck nach `N` geht nur noch ueber `PS`
-- `PS` -> sofortiges Sicherheits-`N`
-
-Fahrmodi:
-
-- `L2` schaltet zwischen `Normal` und `Sport`
-- `Normal` = progressive Gas- und Lenkkennlinie
-- `Sport` = lineare Gas- und Lenkkennlinie
-
-Kamera:
-
-- `R2` schaltet zwischen Front- und Rueckansicht
-- bei aktiver Rueckansicht wird die Lenkung invertiert
-
-Licht:
-
-- `R1` tippen -> Hauptlicht ein/aus
-- `L1` tippen -> Lichthupe
+- `Neutral freigegeben = 0` -> Fahrzeug bleibt verriegelt in `N`
+- `Neutral freigegeben = 1` und kein Richtungsbit -> `N` freigegeben
+- `Sollzustand Vorwaerts = 1` -> `D`
+- `Sollzustand Rueckwaerts = 1` -> `R`
+- `Sportmodus aktiv = 1` -> `Sport`, sonst `Normal`
+- `Kamera hinten aktiv = 1` -> Rueckfahrkamera und invertierte Lenkung
+- `Hauptlicht ein = 1` -> Hauptlicht an
+- `Lichthupe aktiv = 1` -> Lichtausgang zusaetzlich aktiv
 - Bremse gedrueckt -> Bremslicht an
 
 Pedalverhalten:
@@ -192,14 +169,12 @@ Der STM32 baut zwei standardkonforme CRSF-Telemetrie-Frames:
 Aktueller Textinhalt im `0x21 Flight Mode`-Frame:
 
 ```text
-<Gear>|<Mode>|L<0/1>|C<0/1>|T<degC>
+T<degC>
 ```
 
-Beispiele:
+Beispiel:
 
-- `N|NORMAL|L0|C0|T28`
-- `D|SPORT|L1|C0|T31`
-- `R|NORMAL|L1|C1|T34`
+- `T31`
 
 Bedeutung:
 
@@ -232,8 +207,6 @@ Wichtige Konstanten:
 - `BRAKE_ACTIVE_DEADBAND_US`
 - `CAMERA_PWM_FRONT_US`
 - `CAMERA_PWM_REAR_US`
-- `LIGHTS_COMBO_WINDOW_MS`
-- `LIGHTS_FLASH_DURATION_MS`
 
 ## Relevante Code-Dateien
 

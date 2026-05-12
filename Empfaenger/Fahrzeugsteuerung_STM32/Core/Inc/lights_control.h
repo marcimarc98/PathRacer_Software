@@ -8,8 +8,8 @@
 
 typedef struct
 {
-  bool shift_combo_edge;
   bool main_light_on;
+  bool flash_active;
   bool brake_light_on;
 } lights_control_output_t;
 

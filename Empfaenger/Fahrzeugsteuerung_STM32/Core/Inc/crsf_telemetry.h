@@ -8,11 +8,6 @@
 
 typedef struct
 {
-  vehicle_gear_t gear;
-  vehicle_drive_mode_t drive_mode;
-  bool neutral_locked;
-  bool camera_rear_active;
-  bool main_light_on;
   uint16_t battery_mv;
   uint8_t battery_percent;
   int16_t battery_temp_c;

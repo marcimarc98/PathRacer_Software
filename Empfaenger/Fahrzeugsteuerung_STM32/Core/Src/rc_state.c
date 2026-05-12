@@ -11,13 +11,13 @@
 #define RC_CHANNEL_INDEX_BREMSE  2U
 
 static const uint8_t s_button_channel_map[RC_STATE_NUM_BUTTONS] = {
-    3U,  /* Button 0 -> CH4  (Down Shift) */
-    4U,  /* Button 1 -> CH5  (Up Shift) */
-    5U,  /* Button 2 -> CH6  (R2) */
-    6U,  /* Button 3 -> CH7  (L2) */
-    7U,  /* Button 4 -> CH8  (L1) */
-    8U,  /* Button 5 -> CH9  (R1) */
-    9U   /* Button 6 -> CH10 (PS) */
+    3U,  /* Button 0 -> CH4  (Sollzustand Rueckwaerts) */
+    4U,  /* Button 1 -> CH5  (Sollzustand Vorwaerts) */
+    5U,  /* Button 2 -> CH6  (Kamera hinten aktiv) */
+    6U,  /* Button 3 -> CH7  (Sportmodus aktiv) */
+    7U,  /* Button 4 -> CH8  (Lichthupe aktiv) */
+    8U,  /* Button 5 -> CH9  (Hauptlicht ein) */
+    9U   /* Button 6 -> CH10 (Neutral entriegelt) */
 };
 
 static rc_state_t s_rc_state;

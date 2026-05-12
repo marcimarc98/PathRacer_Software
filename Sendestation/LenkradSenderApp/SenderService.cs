@@ -15,6 +15,20 @@ public sealed class SenderService : IDisposable
     private const WheelAxis SteeringAxis = WheelAxis.X;
     private const WheelAxis GasAxis = WheelAxis.RotationZ;
     private const WheelAxis BrakeAxis = WheelAxis.Y;
+    private const int PhysicalDownShiftButton = 0;
+    private const int PhysicalUpShiftButton = 1;
+    private const int PhysicalR2Button = 8;
+    private const int PhysicalL2Button = 9;
+    private const int PhysicalL1Button = 10;
+    private const int PhysicalR1Button = 11;
+    private const int PhysicalPsButton = 12;
+    private const int LogicalReverseButton = 0;
+    private const int LogicalDriveButton = 1;
+    private const int LogicalCameraRearButton = 2;
+    private const int LogicalSportButton = 3;
+    private const int LogicalFlashButton = 4;
+    private const int LogicalMainLightButton = 5;
+    private const int LogicalNeutralUnlockedButton = 6;
     private const byte StatusHeader1 = 0x5A;
     private const byte StatusHeader2 = 0xA5;
     private const byte StatusPacketType = 0x31;
@@ -22,7 +36,10 @@ public sealed class SenderService : IDisposable
 
     private SerialPort? _serialPort;
     private DirectInputWheel? _wheel;
-    private CancellationTokenSource? _cts;
+    private DirectInputWheel? _previewWheel;
+    private CancellationTokenSource? _wheelCts;
+    private CancellationTokenSource? _espCts;
+    private Task? _wheelTask;
     private Task? _sendTask;
     private Task? _receiveTask;
     private string _statusText = "Bereit";
@@ -34,11 +51,18 @@ public sealed class SenderService : IDisposable
     private VehicleTelemetrySnapshot _lastVehicleTelemetry = VehicleTelemetrySnapshot.Empty;
     private readonly object _debugTelemetryLock = new();
     private DebugTelemetrySnapshot _lastDebugTelemetry = DebugTelemetrySnapshot.Empty;
+    private readonly object _controlStateLock = new();
+    private LocalControlState _localControlState = new();
+    private ControlStateSnapshot _lastControlState = ControlStateSnapshot.Default;
+    private readonly object _outboundLock = new();
+    private OutboundSnapshot _lastOutbound = OutboundSnapshot.Neutral;
 
     public event Action<string>? StatusMessage;
 
-    public bool IsRunning => _sendTask is { IsCompleted: false };
-    public string WheelName => _wheel?.DeviceName ?? "Nicht verbunden";
+    public bool IsRunning => IsWheelRunning || IsEspConnected;
+    public bool IsWheelRunning => _wheel is not null && _wheelCts is { IsCancellationRequested: false };
+    public bool IsEspConnected => _serialPort is { IsOpen: true } && _espCts is { IsCancellationRequested: false };
+    public string WheelName => _wheel?.DeviceName ?? _previewWheel?.DeviceName ?? "Nicht verbunden";
     public string StatusText => _statusText;
     public long PacketCount => Interlocked.Read(ref _packetCount);
     public TelemetrySnapshot LastTelemetry
@@ -74,29 +98,128 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    public ControlStateSnapshot LastControlState
+    {
+        get
+        {
+            lock (_controlStateLock)
+            {
+                return _lastControlState;
+            }
+        }
+    }
+
     public void Start(string portName)
     {
-        if (IsRunning)
+        var startedWheel = false;
+
+        if (!IsWheelRunning)
         {
-            throw new InvalidOperationException("Sender laeuft bereits.");
+            StartWheel();
+            startedWheel = true;
         }
 
-        Stop();
+        try
+        {
+            ConnectEsp(portName);
+        }
+        catch
+        {
+            if (startedWheel)
+            {
+                StopWheel();
+            }
+
+            throw;
+        }
+    }
+
+    public void StartWheel()
+    {
+        if (IsWheelRunning)
+        {
+            throw new InvalidOperationException("Lenkrad laeuft bereits.");
+        }
 
         EmitStatus("Lenkrad wird verbunden...");
+        _backgroundError = null;
+        ResetControlState();
+
+        try
+        {
+            _previewWheel?.Dispose();
+            _previewWheel = null;
+            _wheel?.Dispose();
+            _wheel = new DirectInputWheel();
+
+            EmitStatus($"Lenkrad erkannt: {_wheel.DeviceName}");
+            EmitStatus("Archiv-Mapping aktiv: Lenkung=X, Gas=RZ, Bremse=Y");
+
+            _wheelCts = new CancellationTokenSource();
+            _wheelTask = Task.Run(() => WheelLoop(_wheelCts.Token));
+            EmitStatus("Lenkrad-Loop gestartet.");
+        }
+        catch
+        {
+            _wheelCts?.Dispose();
+            _wheelCts = null;
+            _wheelTask = null;
+            _wheel?.Dispose();
+            _wheel = null;
+            throw;
+        }
+    }
+
+    public void StopWheel()
+    {
+        var wasRunning = IsWheelRunning;
+
+        try
+        {
+            _wheelCts?.Cancel();
+            _wheelTask?.Wait(1000);
+        }
+        catch
+        {
+        }
+
+        _wheelTask = null;
+        _wheelCts?.Dispose();
+        _wheelCts = null;
+        _wheel?.Dispose();
+        _wheel = null;
+
+        ResetControlState();
+        SetTelemetry(TelemetrySnapshot.Empty);
+
+        if (_backgroundError is not null)
+        {
+            EmitStatus($"Fehler: {_backgroundError.Message}");
+        }
+        else if (wasRunning)
+        {
+            EmitStatus("Lenkrad gestoppt");
+        }
+    }
+
+    public void ConnectEsp(string portName)
+    {
+        if (IsEspConnected)
+        {
+            throw new InvalidOperationException("ESP-Verbindung laeuft bereits.");
+        }
+
+        EmitStatus("ESP wird verbunden...");
         _backgroundError = null;
 
         try
         {
-            _wheel = new DirectInputWheel();
-            EmitStatus($"Lenkrad erkannt: {_wheel.DeviceName}");
-            EmitStatus("Archiv-Mapping aktiv: Lenkung=X, Gas=RZ, Bremse=Y");
-
+            _serialPort?.Dispose();
             _serialPort = new SerialPort(portName, BaudRate)
             {
                 Handshake = Handshake.None,
                 ReadTimeout = ReadTimeoutMs,
-                WriteTimeout = SerialPort.InfiniteTimeout,
+                WriteTimeout = 250,
                 WriteBufferSize = 4096,
                 DtrEnable = false,
                 RtsEnable = false,
@@ -104,29 +227,31 @@ public sealed class SenderService : IDisposable
 
             _serialPort.Open();
             Thread.Sleep(1000);
-            EmitStatus($"Serial verbunden: {portName} @ {BaudRate}");
+            EmitStatus($"ESP verbunden: {portName} @ {BaudRate}");
 
+            SetVehicleTelemetry(VehicleTelemetrySnapshot.Empty);
+            SetDebugTelemetry(DebugTelemetrySnapshot.Empty);
             Interlocked.Exchange(ref _packetCount, 0);
-            _cts = new CancellationTokenSource();
-            EmitStatus($"Verbunden: {portName}");
-            _sendTask = Task.Run(() => SendLoop(_cts.Token));
-            _receiveTask = Task.Run(() => ReceiveLoop(_cts.Token));
-            EmitStatus("Sende-Loop gestartet.");
+
+            _espCts = new CancellationTokenSource();
+            _sendTask = Task.Run(() => SendLoop(_espCts.Token));
+            _receiveTask = Task.Run(() => ReceiveLoop(_espCts.Token));
+            EmitStatus("ESP-Sende-/Rueckkanal-Loop gestartet.");
         }
         catch
         {
-            Stop();
+            DisconnectEsp();
             throw;
         }
     }
 
-    public void Stop()
+    public void DisconnectEsp()
     {
-        var wasRunning = IsRunning || _receiveTask is { IsCompleted: false };
+        var wasConnected = IsEspConnected || _receiveTask is { IsCompleted: false };
 
         try
         {
-            _cts?.Cancel();
+            _espCts?.Cancel();
             _sendTask?.Wait(1000);
             _receiveTask?.Wait(1000);
         }
@@ -136,15 +261,12 @@ public sealed class SenderService : IDisposable
 
         _sendTask = null;
         _receiveTask = null;
-        _cts?.Dispose();
-        _cts = null;
+        _espCts?.Dispose();
+        _espCts = null;
 
         _serialPort?.Dispose();
         _serialPort = null;
 
-        _wheel?.Dispose();
-        _wheel = null;
-        SetTelemetry(TelemetrySnapshot.Empty);
         SetVehicleTelemetry(VehicleTelemetrySnapshot.Empty);
         SetDebugTelemetry(DebugTelemetrySnapshot.Empty);
 
@@ -152,15 +274,44 @@ public sealed class SenderService : IDisposable
         {
             EmitStatus($"Fehler: {_backgroundError.Message}");
         }
-        else if (wasRunning)
+        else if (wasConnected)
         {
-            EmitStatus("Gestoppt");
+            EmitStatus("ESP getrennt");
         }
     }
 
-    private void SendLoop(CancellationToken cancellationToken)
+    public void Stop()
     {
-        var serial = _serialPort ?? throw new InvalidOperationException("Serial-Port nicht offen.");
+        DisconnectEsp();
+        StopWheel();
+
+        _previewWheel?.Dispose();
+        _previewWheel = null;
+    }
+
+    public void RefreshLocalPreview()
+    {
+        if (IsWheelRunning)
+        {
+            return;
+        }
+
+        try
+        {
+            _previewWheel ??= new DirectInputWheel();
+            var state = _previewWheel.Poll();
+
+            PublishWheelState(state, updateOutbound: false);
+        }
+        catch
+        {
+            _previewWheel?.Dispose();
+            _previewWheel = null;
+        }
+    }
+
+    private void WheelLoop(CancellationToken cancellationToken)
+    {
         var wheel = _wheel ?? throw new InvalidOperationException("Lenkrad nicht verbunden.");
 
         using var timerScope = WindowsTiming.BeginHighResolution();
@@ -176,21 +327,7 @@ public sealed class SenderService : IDisposable
             while (!cancellationToken.IsCancellationRequested)
             {
                 var state = wheel.Poll();
-
-                var steeringRaw = DirectInputWheel.ReadAxis(state, SteeringAxis);
-                var gasRaw = DirectInputWheel.ReadAxis(state, GasAxis);
-                var brakeRaw = DirectInputWheel.ReadAxis(state, BrakeAxis);
-
-                var steering = ToArchiveSteering(steeringRaw);
-                var gas = ToArchiveGas(gasRaw);
-                var brake = ToArchiveBrake(brakeRaw);
-                var buttons = ReadButtons(state);
-                SetTelemetry(new TelemetrySnapshot(steering, gas, brake, steeringRaw, gasRaw, brakeRaw));
-
-                var packet = HostPacket.Build(steering, gas, brake, buttons);
-                serial.Write(packet, 0, packet.Length);
-
-                Interlocked.Increment(ref _packetCount);
+                PublishWheelState(state, updateOutbound: true);
 
                 nextTick += ticksPerPacket;
                 WaitUntil(stopwatch, nextTick, cancellationToken);
@@ -199,7 +336,43 @@ public sealed class SenderService : IDisposable
         catch (Exception ex)
         {
             _backgroundError = ex;
-            EmitStatus($"Fehler: {ex.Message}");
+            EmitStatus($"Lenkrad-Fehler: {ex.Message}");
+        }
+    }
+
+    private void SendLoop(CancellationToken cancellationToken)
+    {
+        var serial = _serialPort ?? throw new InvalidOperationException("Serial-Port nicht offen.");
+
+        using var timerScope = WindowsTiming.BeginHighResolution();
+
+        Thread.CurrentThread.Priority = ThreadPriority.Highest;
+
+        var stopwatch = Stopwatch.StartNew();
+        var ticksPerPacket = Stopwatch.Frequency / SendHz;
+        var nextTick = stopwatch.ElapsedTicks;
+
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var outbound = GetOutboundSnapshot();
+                var packet = HostPacket.Build(outbound.Steering, outbound.Gas, outbound.Brake, outbound.Buttons);
+                serial.Write(packet, 0, packet.Length);
+
+                Interlocked.Increment(ref _packetCount);
+
+                nextTick += ticksPerPacket;
+                WaitUntil(stopwatch, nextTick, cancellationToken);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException or TimeoutException)
+        {
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                _backgroundError = ex;
+                EmitStatus($"ESP-Sende-Fehler: {ex.Message}");
+            }
         }
     }
 
@@ -227,10 +400,45 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    private void SetOutboundSnapshot(OutboundSnapshot snapshot)
+    {
+        lock (_outboundLock)
+        {
+            _lastOutbound = snapshot;
+        }
+    }
+
+    private OutboundSnapshot GetOutboundSnapshot()
+    {
+        lock (_outboundLock)
+        {
+            return _lastOutbound;
+        }
+    }
+
     private void EmitStatus(string message)
     {
         _statusText = message;
         StatusMessage?.Invoke(message);
+    }
+
+    private void PublishWheelState(JoystickState state, bool updateOutbound)
+    {
+        var steeringRaw = DirectInputWheel.ReadAxis(state, SteeringAxis);
+        var gasRaw = DirectInputWheel.ReadAxis(state, GasAxis);
+        var brakeRaw = DirectInputWheel.ReadAxis(state, BrakeAxis);
+
+        var steering = ToArchiveSteering(steeringRaw);
+        var gas = ToArchiveGas(gasRaw);
+        var brake = ToArchiveBrake(brakeRaw);
+        var buttons = BuildLogicalButtons(state);
+
+        SetTelemetry(new TelemetrySnapshot(steering, gas, brake, steeringRaw, gasRaw, brakeRaw));
+
+        if (updateOutbound)
+        {
+            SetOutboundSnapshot(new OutboundSnapshot(steering, gas, brake, buttons));
+        }
     }
 
     private static short ToArchiveSteering(int raw)
@@ -254,21 +462,169 @@ public sealed class SenderService : IDisposable
         return (ushort)Math.Clamp(pedal, 0, 1000);
     }
 
-    private static ushort ReadButtons(JoystickState state)
+    private void ResetControlState()
     {
-        ushort buttons = 0;
-        var source = state.Buttons;
-        var count = Math.Min(13, source.Length);
-
-        for (var i = 0; i < count; i++)
+        lock (_controlStateLock)
         {
-            if (source[i])
-            {
-                buttons |= (ushort)(1 << i);
-            }
+            _localControlState = new LocalControlState();
+            _lastControlState = ControlStateSnapshot.Default;
         }
 
-        return buttons;
+        SetOutboundSnapshot(OutboundSnapshot.Neutral);
+    }
+
+    private ushort BuildLogicalButtons(JoystickState state)
+    {
+        lock (_controlStateLock)
+        {
+            var downShiftPressed = IsPhysicalButtonPressed(state, PhysicalDownShiftButton);
+            var upShiftPressed = IsPhysicalButtonPressed(state, PhysicalUpShiftButton);
+            var r2Pressed = IsPhysicalButtonPressed(state, PhysicalR2Button);
+            var l2Pressed = IsPhysicalButtonPressed(state, PhysicalL2Button);
+            var l1Pressed = IsPhysicalButtonPressed(state, PhysicalL1Button);
+            var r1Pressed = IsPhysicalButtonPressed(state, PhysicalR1Button);
+            var psPressed = IsPhysicalButtonPressed(state, PhysicalPsButton);
+
+            var downShiftRising = downShiftPressed && !_localControlState.PrevDownShiftPressed;
+            var upShiftRising = upShiftPressed && !_localControlState.PrevUpShiftPressed;
+            var r2Rising = r2Pressed && !_localControlState.PrevR2Pressed;
+            var l2Rising = l2Pressed && !_localControlState.PrevL2Pressed;
+            var l1Rising = l1Pressed && !_localControlState.PrevL1Pressed;
+            var r1Rising = r1Pressed && !_localControlState.PrevR1Pressed;
+            var l1Falling = !l1Pressed && _localControlState.PrevL1Pressed;
+            var r1Falling = !r1Pressed && _localControlState.PrevR1Pressed;
+            var psRising = psPressed && !_localControlState.PrevPsPressed;
+
+            if (!l1Pressed && !r1Pressed)
+            {
+                _localControlState.ComboLatched = false;
+                _localControlState.L1Pending = false;
+                _localControlState.R1Pending = false;
+            }
+
+            if (l1Rising)
+            {
+                _localControlState.L1Pending = true;
+            }
+
+            if (r1Rising)
+            {
+                _localControlState.R1Pending = true;
+            }
+
+            if (!_localControlState.ComboLatched && l1Pressed && r1Pressed)
+            {
+                if ((_localControlState.Gear == 'N') && !_localControlState.NeutralUnlocked)
+                {
+                    _localControlState.NeutralUnlocked = true;
+                }
+
+                _localControlState.ComboLatched = true;
+                _localControlState.L1Pending = false;
+                _localControlState.R1Pending = false;
+            }
+
+            if (r1Falling && _localControlState.R1Pending && !_localControlState.ComboLatched)
+            {
+                _localControlState.MainLightOn = !_localControlState.MainLightOn;
+                _localControlState.R1Pending = false;
+            }
+
+            if (l1Falling)
+            {
+                _localControlState.L1Pending = false;
+            }
+
+            if (psRising)
+            {
+                _localControlState.Gear = 'N';
+                _localControlState.NeutralUnlocked = false;
+            }
+            else if (_localControlState.NeutralUnlocked)
+            {
+                if (upShiftRising)
+                {
+                    _localControlState.Gear = 'D';
+                }
+                else if (downShiftRising)
+                {
+                    _localControlState.Gear = 'R';
+                }
+            }
+
+            if (l2Rising)
+            {
+                _localControlState.SportMode = !_localControlState.SportMode;
+            }
+
+            if (r2Rising)
+            {
+                _localControlState.CameraRearActive = !_localControlState.CameraRearActive;
+            }
+
+            _localControlState.FlashActive = l1Pressed && !_localControlState.ComboLatched && !r1Pressed;
+
+            _localControlState.PrevDownShiftPressed = downShiftPressed;
+            _localControlState.PrevUpShiftPressed = upShiftPressed;
+            _localControlState.PrevR2Pressed = r2Pressed;
+            _localControlState.PrevL2Pressed = l2Pressed;
+            _localControlState.PrevL1Pressed = l1Pressed;
+            _localControlState.PrevR1Pressed = r1Pressed;
+            _localControlState.PrevPsPressed = psPressed;
+
+            ushort buttons = 0;
+
+            if (_localControlState.Gear == 'R')
+            {
+                buttons |= (ushort)(1 << LogicalReverseButton);
+            }
+
+            if (_localControlState.Gear == 'D')
+            {
+                buttons |= (ushort)(1 << LogicalDriveButton);
+            }
+
+            if (_localControlState.CameraRearActive)
+            {
+                buttons |= (ushort)(1 << LogicalCameraRearButton);
+            }
+
+            if (_localControlState.SportMode)
+            {
+                buttons |= (ushort)(1 << LogicalSportButton);
+            }
+
+            if (_localControlState.FlashActive)
+            {
+                buttons |= (ushort)(1 << LogicalFlashButton);
+            }
+
+            if (_localControlState.MainLightOn)
+            {
+                buttons |= (ushort)(1 << LogicalMainLightButton);
+            }
+
+            if (_localControlState.NeutralUnlocked)
+            {
+                buttons |= (ushort)(1 << LogicalNeutralUnlockedButton);
+            }
+
+            _lastControlState = new ControlStateSnapshot(
+                Gear: _localControlState.Gear,
+                NeutralUnlocked: _localControlState.NeutralUnlocked,
+                SportMode: _localControlState.SportMode,
+                CameraRearActive: _localControlState.CameraRearActive,
+                MainLightOn: _localControlState.MainLightOn,
+                FlashActive: _localControlState.FlashActive);
+
+            return buttons;
+        }
+    }
+
+    private static bool IsPhysicalButtonPressed(JoystickState state, int index)
+    {
+        var buttons = state.Buttons;
+        return (index >= 0) && (index < buttons.Length) && buttons[index];
     }
 
     private static void WaitUntil(Stopwatch stopwatch, long targetTicks, CancellationToken cancellationToken)
@@ -571,6 +927,46 @@ public sealed class SenderService : IDisposable
         short BatteryTempC)
     {
         public static readonly DebugTelemetrySnapshot Empty = new(0, 0, 0, 0, 0, 0, 0, 0, "00", false, '-', 0, 0, 0);
+    }
+
+    public readonly record struct ControlStateSnapshot(
+        char Gear,
+        bool NeutralUnlocked,
+        bool SportMode,
+        bool CameraRearActive,
+        bool MainLightOn,
+        bool FlashActive)
+    {
+        public static readonly ControlStateSnapshot Default = new('N', false, false, false, false, false);
+    }
+
+    private readonly record struct OutboundSnapshot(
+        short Steering,
+        ushort Gas,
+        ushort Brake,
+        ushort Buttons)
+    {
+        public static readonly OutboundSnapshot Neutral = new(0, 0, 0, 0);
+    }
+
+    private sealed class LocalControlState
+    {
+        public char Gear { get; set; } = 'N';
+        public bool NeutralUnlocked { get; set; }
+        public bool SportMode { get; set; }
+        public bool CameraRearActive { get; set; }
+        public bool MainLightOn { get; set; }
+        public bool FlashActive { get; set; }
+        public bool PrevDownShiftPressed { get; set; }
+        public bool PrevUpShiftPressed { get; set; }
+        public bool PrevR2Pressed { get; set; }
+        public bool PrevL2Pressed { get; set; }
+        public bool PrevL1Pressed { get; set; }
+        public bool PrevR1Pressed { get; set; }
+        public bool PrevPsPressed { get; set; }
+        public bool L1Pending { get; set; }
+        public bool R1Pending { get; set; }
+        public bool ComboLatched { get; set; }
     }
 
 }

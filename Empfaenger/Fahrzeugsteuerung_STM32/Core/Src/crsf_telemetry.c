@@ -33,28 +33,9 @@ static uint8_t crc8(const uint8_t* ptr, uint8_t len)
   return crc;
 }
 
-static char gear_to_char(vehicle_gear_t gear)
-{
-  switch (gear)
-  {
-    case VEHICLE_GEAR_REVERSE:
-      return 'R';
-    case VEHICLE_GEAR_DRIVE:
-      return 'D';
-    case VEHICLE_GEAR_NEUTRAL:
-    default:
-      return 'N';
-  }
-}
-
-static const char* drive_mode_to_text(vehicle_drive_mode_t drive_mode)
-{
-  return (drive_mode == VEHICLE_DRIVE_MODE_SPORT) ? "SPORT" : "NORMAL";
-}
-
 static uint8_t build_flight_mode_frame(uint8_t* out_frame, size_t out_frame_size, const crsf_vehicle_status_t* status)
 {
-  char payload[32];
+  char payload[12];
   size_t payload_length = 0U;
   uint8_t frame_length = 0U;
 
@@ -66,11 +47,7 @@ static uint8_t build_flight_mode_frame(uint8_t* out_frame, size_t out_frame_size
   (void)snprintf(
       payload,
       sizeof(payload),
-      "%c|%s|L%u|C%u|T%d",
-      gear_to_char(status->gear),
-      drive_mode_to_text(status->drive_mode),
-      status->main_light_on ? 1U : 0U,
-      status->camera_rear_active ? 1U : 0U,
+      "T%d",
       status->battery_temp_c);
 
   payload_length = strlen(payload) + 1U;

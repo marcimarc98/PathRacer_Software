@@ -31,7 +31,7 @@ typedef struct
 
 void vehicle_control_init(void);
 void vehicle_control_on_signal_lost(void);
-void vehicle_control_step(const rc_state_t* rc_state, bool unlock_combo_edge, vehicle_command_t* out_command);
+void vehicle_control_step(const rc_state_t* rc_state, vehicle_command_t* out_command);
 void vehicle_control_get_status(vehicle_command_t* out_command);
 
 #endif
