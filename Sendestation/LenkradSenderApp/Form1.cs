@@ -160,7 +160,7 @@ public partial class Form1 : Form
                 "Down Shift: R" + Environment.NewLine +
                 "Danach D/R ohne erneute Freigabe umschaltbar" + Environment.NewLine +
                 "PS: Sicherheits-N" + Environment.NewLine +
-                "L2: Fahrmodus Normal/Sport" + Environment.NewLine +
+                "L2: Fahrmodus Aggressiv/Normal" + Environment.NewLine +
                 "R2: Kamera vorne/hinten" + Environment.NewLine +
                 "R1: Licht ein/aus" + Environment.NewLine +
                 "L1: Lichthupe",
@@ -668,7 +668,7 @@ public partial class Form1 : Form
     private void UpdateVehicleStatus(SenderService.ControlStateSnapshot control, SenderService.VehicleTelemetrySnapshot telemetry)
     {
         labelVehicleLinkValue.Text = telemetry.LinkActive ? "Aktiv" : "Inaktiv";
-        labelVehicleModeValue.Text = control.SportMode ? "Sport" : "Normal";
+        labelVehicleModeValue.Text = control.SportMode ? "Normal" : "Aggressiv";
         labelVehicleCameraValue.Text = control.CameraRearActive ? "Hinten" : "Vorne";
         labelVehicleLightValue.Text = control.FlashActive
             ? (control.MainLightOn ? "Ein + Lichthupe" : "Lichthupe")

@@ -633,7 +633,7 @@ partial class Form1
         labelVehicleControlsValue.Name = "labelVehicleControlsValue";
         labelVehicleControlsValue.Size = new Size(860, 58);
         labelVehicleControlsValue.TabIndex = 23;
-        labelVehicleControlsValue.Text = "L1 + R1: Fahrstufe aus N freigeben   |   PS: Sicherheits-N\r\nUp Shift: D   |   Down Shift: R   |   L2: Fahrmodus Normal/Sport\r\nR2: Kamera vorne/hinten   |   R1: Licht ein/aus   |   L1: Lichthupe";
+        labelVehicleControlsValue.Text = "L1 + R1: Fahrstufe aus N freigeben   |   PS: Sicherheits-N\r\nUp Shift: D   |   Down Shift: R   |   L2: Fahrmodus Aggressiv/Normal\r\nR2: Kamera vorne/hinten   |   R1: Licht ein/aus   |   L1: Lichthupe";
         // 
         // textStatusLog
         // 

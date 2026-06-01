@@ -10,9 +10,11 @@
 #define PEDAL_MAX_US                   2000
 #define CONTROL_NEUTRAL_US             1500
 #define GAS_ACTIVE_DEADBAND_US         8
-#define BRAKE_ACTIVE_DEADBAND_US       25
+#define BRAKE_ACTIVE_ENTER_DEADBAND_US 80
+#define BRAKE_ACTIVE_EXIT_DEADBAND_US  40
 #define REVERSE_GAS_LIMIT_PERCENT      20U
 #define NORMAL_DRIVE_PROGRESSIVITY_PERCENT 95U
+#define NORMAL_DRIVE_LAUNCH_OFFSET_US  50U
 #define STEERING_EXPO_PERCENT          65U
 
 typedef struct
@@ -23,6 +25,7 @@ typedef struct
   bool camera_rear_active;
   bool drive_brake_cycle_active;
   bool drive_brake_lockout;
+  bool brake_input_active;
 } vehicle_control_state_t;
 
 static vehicle_control_state_t s_vehicle_control;
@@ -69,6 +72,18 @@ static uint16_t pedal_to_amount_with_deadband(int pedal_us, int deadband_us)
   return (uint16_t)amount;
 }
 
+static uint16_t pedal_to_amount_raw(int pedal_us)
+{
+  int amount = clamp_us(pedal_us) - PEDAL_MIN_US;
+
+  if (amount <= 0)
+  {
+    return 0U;
+  }
+
+  return (uint16_t)amount;
+}
+
 static bool rc_button_is_pressed(const rc_state_t* rc_state, uint32_t index)
 {
   if ((rc_state == 0) || (index >= RC_STATE_NUM_BUTTONS))
@@ -96,18 +111,32 @@ static uint16_t apply_normal_drive_curve(uint16_t gas_amount)
 {
   const uint32_t full_scale = (uint32_t)get_pedal_full_scale();
   const uint32_t progressivity = NORMAL_DRIVE_PROGRESSIVITY_PERCENT;
+  const uint32_t launch_offset = NORMAL_DRIVE_LAUNCH_OFFSET_US;
   const uint32_t linear_amount = (uint32_t)gas_amount;
   const uint32_t cubic_amount =
       ((uint32_t)gas_amount * (uint32_t)gas_amount * (uint32_t)gas_amount) / (full_scale * full_scale);
   uint32_t curved_amount =
       ((linear_amount * (100U - progressivity)) + (cubic_amount * progressivity)) / 100U;
+  uint32_t shifted_amount = 0U;
+
+  if (gas_amount == 0U)
+  {
+    return 0U;
+  }
 
   if (curved_amount > full_scale)
   {
     curved_amount = full_scale;
   }
 
-  return (uint16_t)curved_amount;
+  shifted_amount = launch_offset + ((curved_amount * (full_scale - launch_offset)) / full_scale);
+
+  if (shifted_amount > full_scale)
+  {
+    shifted_amount = full_scale;
+  }
+
+  return (uint16_t)shifted_amount;
 }
 
 static int apply_steering_expo(int steering_us)
@@ -151,6 +180,7 @@ static void reset_brake_interlocks(void)
 {
   s_vehicle_control.drive_brake_cycle_active = false;
   s_vehicle_control.drive_brake_lockout = true;
+  s_vehicle_control.brake_input_active = false;
 }
 
 static void enter_locked_neutral(void)
@@ -164,7 +194,25 @@ static void enter_locked_neutral(void)
 static int mix_drive_esc_output(int gas_us, int brake_us)
 {
   uint16_t gas_amount = pedal_to_amount_with_deadband(gas_us, GAS_ACTIVE_DEADBAND_US);
-  const uint16_t brake_amount = pedal_to_amount_with_deadband(brake_us, BRAKE_ACTIVE_DEADBAND_US);
+  const uint16_t brake_raw_amount = pedal_to_amount_raw(brake_us);
+  uint16_t brake_amount = 0U;
+
+  if (s_vehicle_control.brake_input_active)
+  {
+    if (brake_raw_amount > BRAKE_ACTIVE_EXIT_DEADBAND_US)
+    {
+      brake_amount = brake_raw_amount;
+    }
+    else
+    {
+      s_vehicle_control.brake_input_active = false;
+    }
+  }
+  else if (brake_raw_amount > BRAKE_ACTIVE_ENTER_DEADBAND_US)
+  {
+    s_vehicle_control.brake_input_active = true;
+    brake_amount = brake_raw_amount;
+  }
 
   if (brake_amount > 0U)
   {

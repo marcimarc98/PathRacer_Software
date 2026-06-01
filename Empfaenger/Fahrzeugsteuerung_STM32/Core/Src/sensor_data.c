@@ -9,18 +9,20 @@
 #define ADC_STARTUP_TIMEOUT_LOOPS        100000U
 #define ADC_CONVERSION_TIMEOUT_LOOPS     100000U
 
-#define BATTERY_DIVIDER_TOP_OHM          10000U
-#define BATTERY_DIVIDER_BOTTOM_OHM       1000U
+#define BATTERY_DIVIDER_TOP_OHM          47000U
+#define BATTERY_DIVIDER_BOTTOM_OHM       10000U
 #define BATTERY_EMPTY_MV                 13200U
 #define BATTERY_FULL_MV                  16800U
 #define BATTERY_FILTER_WINDOW_SAMPLES    32U
 
-#define BATTERY_TEMP_DIVIDER_PULLUP_OHM  10000.0f
+#define BATTERY_TEMP_DIVIDER_PULLUP_OHM  3900.0f
 #define BATTERY_TEMP_NTC_R25_OHM         10000.0f
 #define BATTERY_TEMP_NTC_BETA            3950.0f
 #define BATTERY_TEMP_ROOM_KELVIN         298.15f
 #define BATTERY_TEMP_MIN_C               (-40)
 #define BATTERY_TEMP_MAX_C               125
+#define BATTERY_TEMP_LOOKUP_MIN_C        20
+#define BATTERY_TEMP_LOOKUP_MAX_C        80
 
 #define BATTERY_ADC_CHANNEL_INDEX        4U
 #define BATTERY_TEMP_ADC_CHANNEL_INDEX   2U
@@ -28,6 +30,15 @@
 static sensor_data_status_t s_sensor_status;
 static uint32_t s_battery_raw_accumulator = 0U;
 static uint32_t s_battery_raw_sample_count = 0U;
+static const uint16_t s_battery_temp_ntc_ohm_lookup[] = {
+    12501U, 11949U, 11424U, 10925U, 10451U, 10000U, 9571U,  9163U,  8774U,  8404U,
+    8051U,  7715U,  7395U,  7090U,  6800U,  6522U,  6258U,  6005U,  5764U,  5534U,
+    5315U,  5105U,  4905U,  4713U,  4530U,  4355U,  4188U,  4028U,  3875U,  3728U,
+    3588U,  3454U,  3326U,  3203U,  3085U,  2972U,  2864U,  2760U,  2660U,  2565U,
+    2473U,  2386U,  2301U,  2221U,  2143U,  2069U,  1997U,  1928U,  1862U,  1799U,
+    1738U,  1679U,  1623U,  1569U,  1517U,  1467U,  1419U,  1372U,  1328U,  1285U,
+    1243U
+};
 
 static uint16_t clamp_u16(uint32_t value)
 {
@@ -89,6 +100,40 @@ static uint16_t adc_counts_to_mv(uint16_t raw_counts)
   return (uint16_t)(((uint32_t)raw_counts * ADC_REFERENCE_MV) / ADC_FULL_SCALE_COUNTS);
 }
 
+static int battery_temp_lookup_c_from_resistance(float ntc_resistance, float* out_temperature_celsius)
+{
+  const size_t last_index = (sizeof(s_battery_temp_ntc_ohm_lookup) / sizeof(s_battery_temp_ntc_ohm_lookup[0])) - 1U;
+
+  if ((out_temperature_celsius == 0) ||
+      (ntc_resistance > (float)s_battery_temp_ntc_ohm_lookup[0]) ||
+      (ntc_resistance < (float)s_battery_temp_ntc_ohm_lookup[last_index]))
+  {
+    return 0;
+  }
+
+  for (size_t index = 0U; index < last_index; index++)
+  {
+    const float high_ohm = (float)s_battery_temp_ntc_ohm_lookup[index];
+    const float low_ohm = (float)s_battery_temp_ntc_ohm_lookup[index + 1U];
+
+    if ((ntc_resistance <= high_ohm) && (ntc_resistance >= low_ohm))
+    {
+      float temperature_celsius = (float)(BATTERY_TEMP_LOOKUP_MIN_C + (int32_t)index);
+
+      if (high_ohm > low_ohm)
+      {
+        temperature_celsius += (high_ohm - ntc_resistance) / (high_ohm - low_ohm);
+      }
+
+      *out_temperature_celsius = temperature_celsius;
+      return 1;
+    }
+  }
+
+  *out_temperature_celsius = (float)BATTERY_TEMP_LOOKUP_MAX_C;
+  return 1;
+}
+
 static uint16_t battery_voltage_mv_from_counts(uint16_t raw_counts)
 {
   const uint32_t sensed_mv = adc_counts_to_mv(raw_counts);
@@ -122,11 +167,14 @@ static int16_t battery_temp_c_from_counts(uint16_t raw_counts)
     return 0;
   }
 
-  temperature_kelvin =
-      1.0f /
-      ((1.0f / BATTERY_TEMP_ROOM_KELVIN) +
-       (logf(ntc_resistance / BATTERY_TEMP_NTC_R25_OHM) / BATTERY_TEMP_NTC_BETA));
-  temperature_celsius = temperature_kelvin - 273.15f;
+  if (battery_temp_lookup_c_from_resistance(ntc_resistance, &temperature_celsius) == 0)
+  {
+    temperature_kelvin =
+        1.0f /
+        ((1.0f / BATTERY_TEMP_ROOM_KELVIN) +
+         (logf(ntc_resistance / BATTERY_TEMP_NTC_R25_OHM) / BATTERY_TEMP_NTC_BETA));
+    temperature_celsius = temperature_kelvin - 273.15f;
+  }
 
   if (temperature_celsius < (float)BATTERY_TEMP_MIN_C)
   {

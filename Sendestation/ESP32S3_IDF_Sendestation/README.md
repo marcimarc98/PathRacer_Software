@@ -1,38 +1,38 @@
 # ESP32-S3 IDF Sendestation
 
-Eigenstaendiger ESP-IDF-Senderstand fuer den ESP32-S3.
+ESP-IDF-Port des funktionierenden Arduino-Referenzstands in
+[VehicleGroundStation_Reference.ino](C:/Users/marc_/OneDrive/PathRacer/PMT2/Projektdurchfuehrung/Software/Sendestation/VehicleGroundStation_Reference/VehicleGroundStation_Reference.ino).
 
 Ziel:
-- gleiche Host-Paketstruktur wie die bestehende App
-- gleiche CRSF-Kanalbelegung wie der funktionierende Arduino-Stand
-- Rueckkanal weiter als Statuspaket `0x5A 0xA5 0x31 ...` an die Windows-App
-- CRSF-Leitung am Sendermodul elektrisch auf zwei ESP-Pins aufteilen:
-  - `GPIO17` = TX vom ESP zum ELRS-Sendermodul
-  - `GPIO18` = RX vom ELRS-Sendermodul zum ESP
+- gleiches Host-Paketformat wie die Windows-App
+- gleiche CRSF-Kanalbelegung wie der Arduino-Stand
+- gleicher Rueckkanal als Statuspaket `0x5A 0xA5 0x31 ...`
+- gleiches Single-Wire-Verhalten auf der CRSF-Leitung
 
 Verdrahtung:
-- `eine` CRSF-Leitung des Sendermoduls auf `GPIO17` und `GPIO18` gleichzeitig splitten
-- `GPIO17` sendet nur aktiv waehrend eines RC-Frames
-- `GPIO18` lauscht dauerhaft auf Telemetrie
-- spaeter kann optional ein Serienwiderstand im TX-Zweig ergaenzt werden
+- CRSF-Datenleitung wie im Arduino-Stand auf `GPIO17`
+- die IDF-Version schaltet denselben Pin zum Senden kurz aktiv und geht danach wieder in Listen-Modus
 
-USB:
-- Host/App Kommunikation laeuft ueber `USB Serial/JTAG`
-- Baud fuer die App bleibt `460800`
+Host/App:
+- Kommunikation zur Windows-App laeuft ueber `USB Serial/JTAG`
+- die App kann den Port weiter mit `460800` oeffnen
 
-Build (Windows CMD):
+Build:
 
 ```bat
-call C:\esp\v6.0.1\esp-idf\export.bat
+set IDF_PATH=C:\esp\v6.0.1\esp-idf
 cd /d C:\Users\marc_\OneDrive\PathRacer\PMT2\Projektdurchfuehrung\Software\Sendestation\ESP32S3_IDF_Sendestation
-C:\Espressif\tools\idf-exe\1.0.3\idf.py.exe set-target esp32s3
-C:\Espressif\tools\idf-exe\1.0.3\idf.py.exe build
+cmake --build build
 ```
 
 Flash:
 
 ```bat
-call C:\esp\v6.0.1\esp-idf\export.bat
+set IDF_PATH=C:\esp\v6.0.1\esp-idf
 cd /d C:\Users\marc_\OneDrive\PathRacer\PMT2\Projektdurchfuehrung\Software\Sendestation\ESP32S3_IDF_Sendestation
-C:\Espressif\tools\idf-exe\1.0.3\idf.py.exe -p COM11 flash
+cmake --build build --target flash
 ```
+
+Hinweis:
+- die bisherige Idee mit getrennten Pins `GPIO17` und `GPIO18` ist damit bewusst noch nicht umgesetzt
+- dieser Stand priorisiert 1:1-Verhalten zur aktuell funktionierenden Arduino-Referenz

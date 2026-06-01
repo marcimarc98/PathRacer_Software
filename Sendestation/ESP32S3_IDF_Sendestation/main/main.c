@@ -5,23 +5,26 @@
 
 #include "driver/gpio.h"
 #include "driver/uart.h"
+#include "driver/usb_serial_jtag.h"
 #include "esp_err.h"
+#include "esp_rom_gpio.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "soc/gpio_sig_map.h"
 
-#define UART_HOST                   UART_NUM_0
-#define UART_CRSF                   UART_NUM_1
-#define HOST_TX_PIN                 GPIO_NUM_43
-#define HOST_RX_PIN                 GPIO_NUM_44
-#define CRSF_DATA_PIN               GPIO_NUM_17
+#define UART_CRSF         UART_NUM_1
+#define CRSF_DATA_PIN     GPIO_NUM_17
 
-#define HOST_BAUD                   460800U
-#define CRSF_BAUD                   420000U
-#define SEND_PERIOD_US              4000U
-#define STATUS_PERIOD_MS            100U
-#define STATUS_VALID_MS             3000U
-#define DEBUG_PERIOD_MS             250U
+#define USB_BAUD          460800U
+#define CRSF_BAUD         420000U
+#define SEND_PERIOD_US    4000U
+#define STATUS_PERIOD_MS  100U
+#define STATUS_VALID_MS   3000U
+#define DEBUG_PERIOD_MS   250U
+
+#define HOST_RX_BUFFER_SIZE 256U
+#define HOST_TX_BUFFER_SIZE 2048U
 
 #define CRSF_SYNC_BYTE                    0xC8U
 #define CRSF_FRAMETYPE_RC_CHANNELS_PACKED 0x16U
@@ -29,14 +32,15 @@
 #define CRSF_FRAMETYPE_LINK_STATISTICS    0x14U
 #define CRSF_FRAMETYPE_FLIGHT_MODE        0x21U
 #define CRSF_FRAMETYPE_DEVICE_INFO        0x29U
-#define CRSF_MAX_FRAME_SIZE               64U
-#define CRSF_MIN_LENGTH_FIELD             2U
-#define CRSF_MAX_LENGTH_FIELD             62U
 
-#define CRSF_NUM_CHANNELS      16U
-#define CRSF_PAYLOAD_SIZE      22U
-#define CRSF_LEN_FIELD         (1U + CRSF_PAYLOAD_SIZE + 1U)
-#define CRSF_TOTAL_FRAME_SIZE  (2U + CRSF_LEN_FIELD)
+#define CRSF_MIN_LENGTH_FIELD 2U
+#define CRSF_MAX_LENGTH_FIELD 62U
+#define CRSF_MAX_FRAME_SIZE   64U
+
+#define CRSF_NUM_CHANNELS     16U
+#define CRSF_PAYLOAD_SIZE     22U
+#define CRSF_LEN_FIELD        (1U + CRSF_PAYLOAD_SIZE + 1U)
+#define CRSF_TOTAL_FRAME_SIZE (2U + CRSF_LEN_FIELD)
 
 #define CRSF_CHANNEL_VALUE_MIN 192U
 #define CRSF_CHANNEL_VALUE_MID 992U
@@ -47,10 +51,10 @@
 #define HOST_PACKET_SIZE            11U
 #define UNUSED_BUTTON_CHANNEL_VALUE CRSF_CHANNEL_VALUE_MIN
 
-#define STATUS_HEADER_1             0x5AU
-#define STATUS_HEADER_2             0xA5U
-#define STATUS_PACKET_TYPE          0x31U
-#define STATUS_PACKET_SIZE          20U
+#define STATUS_HEADER_1    0x5AU
+#define STATUS_HEADER_2    0xA5U
+#define STATUS_PACKET_TYPE 0x31U
+#define STATUS_PACKET_SIZE 20U
 
 #define LOGICAL_BUTTON_REVERSE          0
 #define LOGICAL_BUTTON_DRIVE            1
@@ -113,6 +117,7 @@ static fahrzeug_status_t s_vehicle_status = {
 };
 
 static debug_stats_t s_debug_stats = {0};
+
 static uint16_t s_tx_channels[CRSF_NUM_CHANNELS];
 static uint8_t s_tx_frame[CRSF_TOTAL_FRAME_SIZE];
 static uint8_t s_host_packet[HOST_PACKET_SIZE];
@@ -120,6 +125,7 @@ static uint8_t s_host_idx = 0U;
 static uint8_t s_rx_frame[CRSF_MAX_FRAME_SIZE];
 static uint8_t s_rx_frame_idx = 0U;
 static uint8_t s_rx_expected_total = 0U;
+static bool s_crsf_tx_attached = false;
 
 static const uint8_t crc8tab[256] = {
     0x00, 0xD5, 0x7F, 0xAA, 0xFE, 0x2B, 0x81, 0x54,
@@ -177,9 +183,11 @@ static uint16_t clamp_channel(int value)
     if (value < (int)CRSF_CHANNEL_VALUE_MIN) {
         return CRSF_CHANNEL_VALUE_MIN;
     }
+
     if (value > (int)CRSF_CHANNEL_VALUE_MAX) {
         return CRSF_CHANNEL_VALUE_MAX;
     }
+
     return (uint16_t)value;
 }
 
@@ -188,9 +196,11 @@ static int clamp_us(int value)
     if (value < 1000) {
         return 1000;
     }
+
     if (value > 2000) {
         return 2000;
     }
+
     return value;
 }
 
@@ -205,11 +215,22 @@ static uint16_t bool_to_crsf(bool value)
     return value ? CRSF_CHANNEL_VALUE_MAX : CRSF_CHANNEL_VALUE_MIN;
 }
 
+static int norm_steer_to_us(int16_t steer)
+{
+    return clamp_us(1500 + ((int)steer / 2));
+}
+
+static int norm_pedal_to_us(uint16_t pedal)
+{
+    return clamp_us(1000 + (int)pedal);
+}
+
 static uint16_t channel_value_for_button(const steuerdaten_t *state, int button_index)
 {
     if ((state == NULL) || (button_index < 0) || (button_index >= 13)) {
         return CRSF_CHANNEL_VALUE_MIN;
     }
+
     return bool_to_crsf(state->button[button_index]);
 }
 
@@ -249,19 +270,35 @@ static bool commanded_camera_rear(void)
     return logical_button_active(LOGICAL_BUTTON_CAMERA_REAR);
 }
 
-static int norm_steer_to_us(int16_t steer)
+static void enter_crsf_listen_mode(void)
 {
-    return clamp_us(1500 + ((int)steer / 2));
+    if (s_crsf_tx_attached) {
+        esp_rom_gpio_connect_out_signal(CRSF_DATA_PIN, SIG_GPIO_OUT_IDX, false, false);
+        s_crsf_tx_attached = false;
+    }
+
+    gpio_set_direction(CRSF_DATA_PIN, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(CRSF_DATA_PIN, GPIO_PULLUP_ONLY);
 }
 
-static int norm_pedal_to_us(uint16_t pedal)
+static void enter_crsf_send_mode(void)
 {
-    return clamp_us(1000 + (int)pedal);
+    gpio_set_direction(CRSF_DATA_PIN, GPIO_MODE_INPUT_OUTPUT);
+    gpio_set_pull_mode(CRSF_DATA_PIN, GPIO_PULLUP_ONLY);
+
+    ESP_ERROR_CHECK(uart_set_pin(
+        UART_CRSF,
+        CRSF_DATA_PIN,
+        CRSF_DATA_PIN,
+        UART_PIN_NO_CHANGE,
+        UART_PIN_NO_CHANGE));
+
+    s_crsf_tx_attached = true;
 }
 
-static void fill_channels(uint16_t *channels)
+static void fill_channels(uint16_t channels[CRSF_NUM_CHANNELS])
 {
-    for (uint32_t i = 0; i < CRSF_NUM_CHANNELS; i++) {
+    for (uint32_t i = 0; i < CRSF_NUM_CHANNELS; ++i) {
         channels[i] = CRSF_CHANNEL_VALUE_MID;
     }
 
@@ -276,12 +313,13 @@ static void fill_channels(uint16_t *channels)
     channels[8] = channel_value_for_button(&s_state, 5);
     channels[9] = channel_value_for_button(&s_state, 6);
 
-    for (uint32_t i = 10; i < CRSF_NUM_CHANNELS; i++) {
+    for (uint32_t i = 10; i < CRSF_NUM_CHANNELS; ++i) {
         channels[i] = UNUSED_BUTTON_CHANNEL_VALUE;
     }
 }
 
-static void build_crsf_rc_frame(uint8_t *frame, const uint16_t *channels)
+static void build_crsf_rc_channels_frame(uint8_t frame[CRSF_TOTAL_FRAME_SIZE],
+                                         const uint16_t channels[CRSF_NUM_CHANNELS])
 {
     uint32_t bitbuf = 0U;
     uint8_t bitcnt = 0U;
@@ -293,8 +331,9 @@ static void build_crsf_rc_frame(uint8_t *frame, const uint16_t *channels)
 
     memset(&frame[3], 0, CRSF_PAYLOAD_SIZE);
 
-    for (uint32_t i = 0; i < CRSF_NUM_CHANNELS; i++) {
+    for (uint32_t i = 0; i < CRSF_NUM_CHANNELS; ++i) {
         const uint16_t value = clamp_channel((int)channels[i]) & 0x07FFU;
+
         bitbuf |= ((uint32_t)value) << bitcnt;
         bitcnt += 11U;
 
@@ -302,7 +341,8 @@ static void build_crsf_rc_frame(uint8_t *frame, const uint16_t *channels)
             if (payload_index < CRSF_PAYLOAD_SIZE) {
                 frame[3U + payload_index] = (uint8_t)(bitbuf & 0xFFU);
             }
-            payload_index++;
+
+            ++payload_index;
             bitbuf >>= 8U;
             bitcnt -= 8U;
         }
@@ -324,6 +364,7 @@ static bool is_valid_sync_byte(uint8_t value)
         case 0xECU:
         case 0xEEU:
             return true;
+
         default:
             return false;
     }
@@ -360,13 +401,36 @@ static void parse_flight_mode_payload(const uint8_t *payload, size_t payload_len
         return;
     }
 
-    if (sscanf(mode_text, "%c|%7[^|]|L%u|C%u|T%d", &gear, drive_mode, &light, &camera, &battery_temp_c) == 5) {
+    int parsed = sscanf(
+        mode_text,
+        "%c|%7[^|]|L%u|C%u|T%d",
+        &gear,
+        drive_mode,
+        &light,
+        &camera,
+        &battery_temp_c);
+
+    if (parsed < 4) {
+        parsed = sscanf(
+            mode_text,
+            "%c|%7[^|]|L%u|C%u",
+            &gear,
+            drive_mode,
+            &light,
+            &camera);
+    }
+
+    if (parsed >= 4) {
         s_vehicle_status.valid = true;
         s_vehicle_status.gear = gear;
         s_vehicle_status.sport_mode = strcmp(drive_mode, "SPORT") == 0;
         s_vehicle_status.main_light_on = (light != 0U);
         s_vehicle_status.camera_rear_active = (camera != 0U);
-        s_vehicle_status.battery_temp_c = (int16_t)battery_temp_c;
+
+        if (parsed == 5) {
+            s_vehicle_status.battery_temp_c = (int16_t)battery_temp_c;
+        }
+
         s_vehicle_status.last_update_ms = millis_now();
         s_vehicle_status.last_link_activity_ms = millis_now();
     }
@@ -418,6 +482,8 @@ static void process_telemetry_frame(const uint8_t *frame)
         return;
     }
 
+    s_vehicle_status.last_link_activity_ms = millis_now();
+
     if (type == CRSF_FRAMETYPE_FLIGHT_MODE) {
         s_debug_stats.flight_mode_frames_seen++;
         parse_flight_mode_payload(payload, payload_length);
@@ -438,7 +504,7 @@ static void process_telemetry_frame(const uint8_t *frame)
 
     if (type == CRSF_FRAMETYPE_DEVICE_INFO) {
         s_debug_stats.device_info_frames_seen++;
-        s_vehicle_status.last_link_activity_ms = millis_now();
+        return;
     }
 }
 
@@ -462,6 +528,7 @@ static void process_telemetry_byte(uint8_t value)
             } else {
                 reset_telemetry_parser();
             }
+
             return;
         }
 
@@ -471,6 +538,7 @@ static void process_telemetry_byte(uint8_t value)
         if (s_rx_expected_total > CRSF_MAX_FRAME_SIZE) {
             reset_telemetry_parser();
         }
+
         return;
     }
 
@@ -498,7 +566,7 @@ static void read_crsf_telemetry(void)
 
     s_debug_stats.telemetry_bytes_seen += (uint32_t)bytes_read;
 
-    for (int i = 0; i < bytes_read; i++) {
+    for (int i = 0; i < bytes_read; ++i) {
         process_telemetry_byte(buffer[i]);
     }
 }
@@ -515,21 +583,31 @@ static uint8_t gear_to_code(char gear)
 
 static void host_write_best_effort(const void *data, size_t length)
 {
-    size_t free_size = 0U;
+    const uint8_t *buffer = (const uint8_t *)data;
+    size_t total_written = 0U;
+    TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(2);
 
     if ((data == NULL) || (length == 0U)) {
         return;
     }
 
-    if (uart_get_tx_buffer_free_size(UART_HOST, &free_size) != ESP_OK) {
+    if (!usb_serial_jtag_is_connected()) {
         return;
     }
 
-    if (free_size < length) {
-        return;
-    }
+    while (total_written < length) {
+        TickType_t now = xTaskGetTickCount();
+        TickType_t wait_ticks = (now < deadline) ? (deadline - now) : 0U;
+        int written = usb_serial_jtag_write_bytes(buffer + total_written,
+                                                  length - total_written,
+                                                  wait_ticks);
 
-    (void)uart_tx_chars(UART_HOST, (const char *)data, (uint32_t)length);
+        if (written <= 0) {
+            return;
+        }
+
+        total_written += (size_t)written;
+    }
 }
 
 static void send_vehicle_status_to_host(void)
@@ -540,7 +618,8 @@ static void send_vehicle_status_to_host(void)
     uint8_t flags = 0U;
     uint32_t now_ms = millis_now();
     bool link_active = (now_ms - s_vehicle_status.last_link_activity_ms) <= STATUS_VALID_MS;
-    bool vehicle_status_valid = s_vehicle_status.valid && ((now_ms - s_vehicle_status.last_update_ms) <= STATUS_VALID_MS);
+    bool vehicle_status_valid = s_vehicle_status.valid &&
+                                ((now_ms - s_vehicle_status.last_update_ms) <= STATUS_VALID_MS);
 
     if ((now_ms - last_status_ms) < STATUS_PERIOD_MS) {
         return;
@@ -551,15 +630,19 @@ static void send_vehicle_status_to_host(void)
     if (link_active) {
         flags |= 0x01U;
     }
-    if (vehicle_status_valid) {
-        flags |= 0x08U;
-    }
+
     if (commanded_sport_mode()) {
         flags |= 0x02U;
     }
+
     if (commanded_main_light()) {
         flags |= 0x04U;
     }
+
+    if (vehicle_status_valid) {
+        flags |= 0x08U;
+    }
+
     if (commanded_camera_rear()) {
         flags |= 0x10U;
     }
@@ -584,18 +667,18 @@ static void send_vehicle_status_to_host(void)
     packet[17] = s_vehicle_status.tx_power;
     packet[18] = s_vehicle_status.sequence++;
 
-    for (uint32_t i = 0; i < STATUS_PACKET_SIZE - 1U; i++) {
+    for (uint32_t i = 0; i < STATUS_PACKET_SIZE - 1U; ++i) {
         checksum ^= packet[i];
     }
-    packet[19] = checksum;
 
+    packet[19] = checksum;
     host_write_best_effort(packet, sizeof(packet));
 }
 
-static void send_usb_debug_line(void)
+static void send_debug_line(void)
 {
     static uint32_t last_debug_ms = 0U;
-    char line[200];
+    char line[240];
     uint32_t now_ms = millis_now();
 
     if ((now_ms - last_debug_ms) < DEBUG_PERIOD_MS) {
@@ -607,7 +690,7 @@ static void send_usb_debug_line(void)
     snprintf(
         line,
         sizeof(line),
-        "!dbg host=%lu rx=%lu frm=%lu crc=%lu fm=%lu bat=%lu ls=%lu dev=%lu last=%02X valid=%u gear=%c mv=%u pct=%u tmp=%d\n",
+        "!dbg host=%lu rx=%lu frm=%lu crc=%lu fm=%lu bat=%lu ls=%lu dev=%lu last=%02X valid=%u gear=%c mv=%u pct=%u tmp=%d ulq=%u urssi=%u usnr=%d dlq=%u drssi=%u dsnr=%d\n",
         (unsigned long)s_debug_stats.host_packets_decoded,
         (unsigned long)s_debug_stats.telemetry_bytes_seen,
         (unsigned long)s_debug_stats.telemetry_frames_seen,
@@ -621,7 +704,13 @@ static void send_usb_debug_line(void)
         commanded_gear(),
         (unsigned int)s_vehicle_status.battery_mv,
         (unsigned int)s_vehicle_status.battery_percent,
-        (int)s_vehicle_status.battery_temp_c);
+        (int)s_vehicle_status.battery_temp_c,
+        (unsigned int)s_vehicle_status.uplink_lq,
+        (unsigned int)s_vehicle_status.uplink_rssi,
+        (int)s_vehicle_status.uplink_snr,
+        (unsigned int)s_vehicle_status.downlink_lq,
+        (unsigned int)s_vehicle_status.downlink_rssi,
+        (int)s_vehicle_status.downlink_snr);
 
     host_write_best_effort(line, strlen(line));
 }
@@ -630,7 +719,11 @@ static bool decode_host_packet(const uint8_t *packet, steuerdaten_t *out_state)
 {
     uint8_t checksum = 0U;
 
-    for (uint32_t i = 0; i < HOST_PACKET_SIZE - 1U; i++) {
+    if ((packet == NULL) || (out_state == NULL)) {
+        return false;
+    }
+
+    for (uint32_t i = 0; i < HOST_PACKET_SIZE - 1U; ++i) {
         checksum ^= packet[i];
     }
 
@@ -638,16 +731,16 @@ static bool decode_host_packet(const uint8_t *packet, steuerdaten_t *out_state)
         return false;
     }
 
-    int16_t steer = (int16_t)(packet[2] | (packet[3] << 8U));
-    uint16_t throttle = (uint16_t)(packet[4] | (packet[5] << 8U));
-    uint16_t brake = (uint16_t)(packet[6] | (packet[7] << 8U));
-    uint16_t buttons = (uint16_t)(packet[8] | (packet[9] << 8U));
+    const int16_t steer = (int16_t)(packet[2] | (packet[3] << 8U));
+    const uint16_t throttle = (uint16_t)(packet[4] | (packet[5] << 8U));
+    const uint16_t brake = (uint16_t)(packet[6] | (packet[7] << 8U));
+    const uint16_t buttons = (uint16_t)(packet[8] | (packet[9] << 8U));
 
     out_state->lenkung_us = norm_steer_to_us(steer);
     out_state->gas_us = norm_pedal_to_us(throttle);
     out_state->bremse_us = norm_pedal_to_us(brake);
 
-    for (uint32_t i = 0; i < 13U; i++) {
+    for (uint32_t i = 0; i < 13U; ++i) {
         out_state->button[i] = ((buttons >> i) & 0x01U) != 0U;
     }
 
@@ -660,60 +753,68 @@ static void reset_host_parser(void)
     s_host_idx = 0U;
 }
 
-static void read_host_packets(void)
+static void process_host_byte(uint8_t value)
 {
-    uint8_t buffer[64];
-    int bytes_read = uart_read_bytes(UART_HOST, buffer, sizeof(buffer), 0U);
-
-    for (int i = 0; i < bytes_read; i++) {
-        uint8_t value = buffer[i];
-
-        if (s_host_idx == 0U) {
-            if (value == HOST_HEADER_1) {
-                s_host_packet[s_host_idx++] = value;
-            }
-            continue;
+    if (s_host_idx == 0U) {
+        if (value == HOST_HEADER_1) {
+            s_host_packet[s_host_idx++] = value;
         }
 
-        if (s_host_idx == 1U) {
-            if (value == HOST_HEADER_2) {
-                s_host_packet[s_host_idx++] = value;
-            } else if (value == HOST_HEADER_1) {
-                s_host_packet[0] = HOST_HEADER_1;
-                s_host_idx = 1U;
-            } else {
-                reset_host_parser();
-            }
-            continue;
-        }
+        return;
+    }
 
-        s_host_packet[s_host_idx++] = value;
-
-        if (s_host_idx == HOST_PACKET_SIZE) {
-            steuerdaten_t next_state;
-            if (decode_host_packet(s_host_packet, &next_state)) {
-                s_state = next_state;
-            }
+    if (s_host_idx == 1U) {
+        if (value == HOST_HEADER_2) {
+            s_host_packet[s_host_idx++] = value;
+        } else if (value == HOST_HEADER_1) {
+            s_host_packet[0] = HOST_HEADER_1;
+            s_host_idx = 1U;
+        } else {
             reset_host_parser();
         }
+
+        return;
+    }
+
+    s_host_packet[s_host_idx++] = value;
+
+    if (s_host_idx == HOST_PACKET_SIZE) {
+        steuerdaten_t next_state;
+
+        if (decode_host_packet(s_host_packet, &next_state)) {
+            s_state = next_state;
+        }
+
+        reset_host_parser();
     }
 }
 
-static void init_host_uart(void)
+static void read_host_packets(void)
 {
-    uart_config_t cfg = {
-        .baud_rate = (int)HOST_BAUD,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
+    uint8_t buffer[64];
+    int bytes_read = 0;
+
+    do {
+        bytes_read = usb_serial_jtag_read_bytes(buffer, sizeof(buffer), 0U);
+
+        for (int i = 0; i < bytes_read; ++i) {
+            process_host_byte(buffer[i]);
+        }
+    } while (bytes_read > 0);
+}
+
+static void init_host_interface(void)
+{
+    usb_serial_jtag_driver_config_t cfg = {
+        .tx_buffer_size = HOST_TX_BUFFER_SIZE,
+        .rx_buffer_size = HOST_RX_BUFFER_SIZE,
     };
 
-    ESP_ERROR_CHECK(uart_driver_install(UART_HOST, 1024, 4096, 0, NULL, 0));
-    ESP_ERROR_CHECK(uart_param_config(UART_HOST, &cfg));
-    ESP_ERROR_CHECK(uart_set_mode(UART_HOST, UART_MODE_UART));
-    ESP_ERROR_CHECK(uart_set_pin(UART_HOST, HOST_TX_PIN, HOST_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    if (!usb_serial_jtag_is_driver_installed()) {
+        ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&cfg));
+    }
+
+    (void)USB_BAUD;
 }
 
 static void init_crsf_uart(void)
@@ -729,40 +830,68 @@ static void init_crsf_uart(void)
 
     ESP_ERROR_CHECK(uart_driver_install(UART_CRSF, 256, 1024, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(UART_CRSF, &cfg));
-    ESP_ERROR_CHECK(uart_set_pin(UART_CRSF, CRSF_DATA_PIN, CRSF_DATA_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    ESP_ERROR_CHECK(uart_set_mode(UART_CRSF, UART_MODE_RS485_APP_CTRL));
+    ESP_ERROR_CHECK(uart_set_mode(UART_CRSF, UART_MODE_UART));
     ESP_ERROR_CHECK(uart_set_line_inverse(UART_CRSF, UART_SIGNAL_INV_DISABLE));
     ESP_ERROR_CHECK(uart_set_rx_full_threshold(UART_CRSF, 1));
     ESP_ERROR_CHECK(uart_set_rx_timeout(UART_CRSF, 2));
     uart_set_always_rx_timeout(UART_CRSF, true);
+
+    enter_crsf_send_mode();
+    enter_crsf_listen_mode();
+}
+
+static void reset_runtime_state(void)
+{
+    for (uint32_t i = 0; i < 13U; ++i) {
+        s_state.button[i] = false;
+    }
+
+    s_state.lenkung_us = 1500;
+    s_state.gas_us = 1000;
+    s_state.bremse_us = 1000;
+
+    memset(&s_vehicle_status, 0, sizeof(s_vehicle_status));
+    s_vehicle_status.valid = false;
+    s_vehicle_status.gear = 'N';
+
+    memset(&s_debug_stats, 0, sizeof(s_debug_stats));
+    reset_host_parser();
+    reset_telemetry_parser();
 }
 
 static void send_crsf_frame(const uint8_t *frame, size_t length)
 {
+    enter_crsf_send_mode();
     uart_write_bytes(UART_CRSF, frame, length);
     uart_wait_tx_done(UART_CRSF, pdMS_TO_TICKS(2));
+    enter_crsf_listen_mode();
 }
 
 void app_main(void)
 {
-    int64_t next_send_us = esp_timer_get_time();
+    int64_t next_send_us = 0;
 
-    init_host_uart();
+    reset_runtime_state();
+    init_host_interface();
     init_crsf_uart();
-    reset_telemetry_parser();
-    reset_host_parser();
 
     while (1) {
         read_host_packets();
         read_crsf_telemetry();
         send_vehicle_status_to_host();
-        send_usb_debug_line();
+        send_debug_line();
 
-        int64_t now_us = esp_timer_get_time();
-        if (now_us >= next_send_us) {
+        const int64_t now_us = esp_timer_get_time();
+
+        if (next_send_us == 0) {
+            next_send_us = now_us;
+        }
+
+        if ((now_us - next_send_us) >= 0) {
             next_send_us += SEND_PERIOD_US;
+
             fill_channels(s_tx_channels);
-            build_crsf_rc_frame(s_tx_frame, s_tx_channels);
+            build_crsf_rc_channels_frame(s_tx_frame, s_tx_channels);
             send_crsf_frame(s_tx_frame, sizeof(s_tx_frame));
         }
 

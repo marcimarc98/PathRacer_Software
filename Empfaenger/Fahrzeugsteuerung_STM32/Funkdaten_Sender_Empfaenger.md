@@ -22,17 +22,44 @@ Aktiv verwendete Pins:
 
 | Funktion | STM32-Pin | Nucleo-Anschluss |
 |---|---|---|
-| Kamera PWM | `PA0` | `A0`, `CN4 Pin 1` |
+| Kamera Switch vorne/hinten | `PA0` | `A0`, `CN4 Pin 1` |
 | Akku-Temp-ADC | `PA1` | `A1`, `CN4 Pin 2` |
 | Akku-ADC | `PA3` | `A2`, `CN4 Pin 3` |
 | CRSF RX vom ELRS-Empfaenger | `PA10` | `D0`, `CN3 Pin 2` |
 | CRSF TX zum ELRS-Empfaenger | `PA9` | `D1`, `CN3 Pin 1` |
-| Servo PWM | `PA6` | `A5`, `CN4 Pin 7` |
+| Lenkservo PWM | `PA6` | `A5`, `CN4 Pin 7` |
 | ESC PWM | `PA7` | `A6`, `CN4 Pin 6` |
 | Hauptlicht | `PB4` | `D12`, `CN4 Pin 14` |
 | Bremslicht | `PB5` | `D11`, `CN4 Pin 13` |
 | SWDIO | `PA13` | SWD Debug |
 | SWCLK | `PA14` | SWD Debug |
+
+Akku-Spannungsteiler fuer `4S Li-Ion`:
+
+- oberer Widerstand von Akku `+` nach `A2/PA3`: `47 kOhm`
+- unterer Widerstand von `A2/PA3` nach Akku `GND`: `10 kOhm`
+
+Akku-Temperatursensor:
+
+- Sensor: `MF52 10k NTC`, ausgelegt auf die uebliche `B3950`-Kennlinie
+- Pullup von `3.3V` nach `A1/PA1`: `3.9 kOhm`
+- NTC von `A1/PA1` nach `GND`
+- Kennlinie im Code fuer `20-80 C` per Tabelle auf den MF52-Daten interpoliert
+
+## Servo-PWM-Pins
+
+Aktuell genutzt und fuer Erweiterungen vorgesehen:
+
+| Funktion | Arduino-Pin | STM32-Pin | Timerfunktion |
+|---|---|---|---|
+| Kamera Switch vorne/hinten | `A0` | `PA0` | `TIM2_CH1` |
+| Akku-Temperatur | `A1` | `PA1` | ADC |
+| Akku-Spannung | `A2` | `PA3` | ADC |
+| Lenkservo | `A5` | `PA6` | `TIM3_CH1` |
+| ESC | `A6` | `PA7` | `TIM3_CH2` |
+| Diff vorne | `D3` | `PB0` | `TIM3_CH3` |
+| Diff hinten | `D6` | `PB1` | `TIM3_CH4` |
+| Kamera-Schwenkservo | `D7` | `PA8` | `TIM1_CH1` |
 
 ## Host-Paket PC -> ESP32
 
@@ -117,7 +144,10 @@ Im aktuellen STM32-Stand sind implementiert:
 - Speichern des kompletten RC-Zustands im RAM
 - Servo-PWM auf `PA6`
 - ESC-PWM auf `PA7`
-- Kamera-PWM auf `PA0`
+- Kamera-Switch-PWM auf `PA0`
+- Kamera-Schwenkservo auf `PA8`
+- Diff vorne auf `PB0`
+- Diff hinten auf `PB1`
 - Hauptlichtausgang auf `PB4`
 - Bremslichtausgang auf `PB5`
 - Akku-Spannungsmessung per ADC auf `PA3`
@@ -126,8 +156,8 @@ Im aktuellen STM32-Stand sind implementiert:
 - Akku-Spannung wird lokal ueber mehrere schnelle Messungen gemittelt und danach in den Rueckkanal gegeben
 - Akku-Temperatur wird direkt gemessen und nicht zusaetzlich gemittelt
 - zustandsgetriebene Fahrstufen `R / N / D`
-- zustandsgetriebener Fahrmodus `Normal / Sport`
-- in `Sport`: lineare Gas- und Lenkkennlinie
+- zustandsgetriebener Fahrmodus `Aggressiv / Normal`
+- in `Aggressiv`: lineare Gas- und Lenkkennlinie
 - in `Normal`: progressive Gas- und progressive Lenkkennlinie
 - Rueckwaerts-Geschwindigkeitslimit
 - zustandsgetriebene Kamera vorne/hinten
@@ -147,7 +177,7 @@ Der STM32 setzt diese Zustande direkt um und behaelt nur die Sicherheitslogik fu
 - `Neutral freigegeben = 1` und kein Richtungsbit -> `N` freigegeben
 - `Sollzustand Vorwaerts = 1` -> `D`
 - `Sollzustand Rueckwaerts = 1` -> `R`
-- `Sportmodus aktiv = 1` -> `Sport`, sonst `Normal`
+- `Sportmodus aktiv = 1` -> `Normal`, sonst `Aggressiv`
 - `Kamera hinten aktiv = 1` -> Rueckfahrkamera und invertierte Lenkung
 - `Hauptlicht ein = 1` -> Hauptlicht an
 - `Lichthupe aktiv = 1` -> Lichtausgang zusaetzlich aktiv
@@ -179,7 +209,7 @@ Beispiel:
 Bedeutung:
 
 - `Gear` = `R`, `N`, `D`
-- `Mode` = `NORMAL` oder `SPORT`
+- `Mode` = `Aggressiv` oder `Normal`
 - `L` = Hauptlicht aus/ein
 - `C` = Front-/Rueckkamera
 - `T` = Akku-Temperatur in `°C`
