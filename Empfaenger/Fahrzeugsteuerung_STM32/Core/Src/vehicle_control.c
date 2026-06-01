@@ -1,4 +1,5 @@
 #include "vehicle_control.h"
+#include "main.h"
 
 #define BUTTON_DESIRED_REVERSE   0U
 #define BUTTON_DESIRED_DRIVE     1U
@@ -16,6 +17,9 @@
 #define NORMAL_DRIVE_PROGRESSIVITY_PERCENT 95U
 #define NORMAL_DRIVE_LAUNCH_OFFSET_US  50U
 #define STEERING_EXPO_PERCENT          65U
+#define REVERSE_PRIME_AMOUNT_US        400U
+#define REVERSE_PRIME_PULSE_MS         300U
+#define REVERSE_PRIME_NEUTRAL_MS       300U
 
 typedef struct
 {
@@ -26,6 +30,8 @@ typedef struct
   bool drive_brake_cycle_active;
   bool drive_brake_lockout;
   bool brake_input_active;
+  bool reverse_prime_active;
+  uint32_t reverse_prime_started_ms;
 } vehicle_control_state_t;
 
 static vehicle_control_state_t s_vehicle_control;
@@ -260,6 +266,44 @@ static int mix_reverse_esc_output(int gas_us, int brake_us)
   return CONTROL_NEUTRAL_US;
 }
 
+static void start_reverse_prime(void)
+{
+  s_vehicle_control.reverse_prime_active = true;
+  s_vehicle_control.reverse_prime_started_ms = HAL_GetTick();
+}
+
+static void stop_reverse_prime(void)
+{
+  s_vehicle_control.reverse_prime_active = false;
+  s_vehicle_control.reverse_prime_started_ms = 0U;
+}
+
+static int mix_reverse_esc_output_with_prime(int gas_us, int brake_us)
+{
+  if (s_vehicle_control.reverse_prime_active)
+  {
+    const uint32_t elapsed_ms = HAL_GetTick() - s_vehicle_control.reverse_prime_started_ms;
+
+    if (elapsed_ms < REVERSE_PRIME_PULSE_MS)
+    {
+      (void)gas_us;
+      (void)brake_us;
+      return CONTROL_NEUTRAL_US - (int)REVERSE_PRIME_AMOUNT_US;
+    }
+
+    if (elapsed_ms < (REVERSE_PRIME_PULSE_MS + REVERSE_PRIME_NEUTRAL_MS))
+    {
+      (void)gas_us;
+      (void)brake_us;
+      return CONTROL_NEUTRAL_US;
+    }
+
+    stop_reverse_prime();
+  }
+
+  return mix_reverse_esc_output(gas_us, brake_us);
+}
+
 static int mix_esc_output(vehicle_gear_t gear, int gas_us, int brake_us)
 {
   if (gear == VEHICLE_GEAR_DRIVE)
@@ -269,9 +313,10 @@ static int mix_esc_output(vehicle_gear_t gear, int gas_us, int brake_us)
 
   if (gear == VEHICLE_GEAR_REVERSE)
   {
-    return mix_reverse_esc_output(gas_us, brake_us);
+    return mix_reverse_esc_output_with_prime(gas_us, brake_us);
   }
 
+  stop_reverse_prime();
   reset_brake_interlocks();
   return CONTROL_NEUTRAL_US;
 }
@@ -300,6 +345,10 @@ static void update_transmission_state(
       s_transmission_state = TRANSMISSION_STATE_REVERSE;
       s_vehicle_control.gear = VEHICLE_GEAR_REVERSE;
       s_vehicle_control.neutral_locked = false;
+      if (previous_gear != VEHICLE_GEAR_REVERSE)
+      {
+        start_reverse_prime();
+      }
       break;
 
     case VEHICLE_GEAR_NEUTRAL:
@@ -349,11 +398,13 @@ void vehicle_control_init(void)
   enter_locked_neutral();
   s_vehicle_control.drive_mode = VEHICLE_DRIVE_MODE_NORMAL;
   s_vehicle_control.camera_rear_active = false;
+  stop_reverse_prime();
   reset_brake_interlocks();
 }
 
 void vehicle_control_on_signal_lost(void)
 {
+  stop_reverse_prime();
 }
 
 void vehicle_control_get_status(vehicle_command_t* out_command)

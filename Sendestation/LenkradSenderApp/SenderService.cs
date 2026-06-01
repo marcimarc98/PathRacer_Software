@@ -47,6 +47,8 @@ public sealed class SenderService : IDisposable
     private Exception? _backgroundError;
     private readonly object _telemetryLock = new();
     private TelemetrySnapshot _lastTelemetry = TelemetrySnapshot.Empty;
+    private readonly object _rawInputLock = new();
+    private RawInputSnapshot _lastRawInput = RawInputSnapshot.Empty;
     private readonly object _vehicleTelemetryLock = new();
     private VehicleTelemetrySnapshot _lastVehicleTelemetry = VehicleTelemetrySnapshot.Empty;
     private readonly object _debugTelemetryLock = new();
@@ -94,6 +96,17 @@ public sealed class SenderService : IDisposable
             lock (_debugTelemetryLock)
             {
                 return _lastDebugTelemetry;
+            }
+        }
+    }
+
+    public RawInputSnapshot LastRawInput
+    {
+        get
+        {
+            lock (_rawInputLock)
+            {
+                return _lastRawInput;
             }
         }
     }
@@ -384,6 +397,14 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    private void SetRawInput(RawInputSnapshot rawInput)
+    {
+        lock (_rawInputLock)
+        {
+            _lastRawInput = rawInput;
+        }
+    }
+
     private void SetVehicleTelemetry(VehicleTelemetrySnapshot telemetry)
     {
         lock (_vehicleTelemetryLock)
@@ -431,9 +452,15 @@ public sealed class SenderService : IDisposable
         var steering = ToArchiveSteering(steeringRaw);
         var gas = ToArchiveGas(gasRaw);
         var brake = ToArchiveBrake(brakeRaw);
+        var pressedButtons = string.Join(",",
+            state.Buttons
+                .Select((pressed, index) => (pressed, index))
+                .Where(item => item.pressed)
+                .Select(item => item.index));
         var buttons = BuildLogicalButtons(state);
 
         SetTelemetry(new TelemetrySnapshot(steering, gas, brake, steeringRaw, gasRaw, brakeRaw));
+        SetRawInput(new RawInputSnapshot(pressedButtons.Length == 0 ? "-" : pressedButtons));
 
         if (updateOutbound)
         {
@@ -496,39 +523,27 @@ public sealed class SenderService : IDisposable
             var psRising = psPressed && !_localControlState.PrevPsPressed;
             var comboHeld = l1Pressed && r1Pressed;
 
-            if (!l1Pressed && !r1Pressed)
-            {
-                _localControlState.ComboLatched = false;
-                _localControlState.L1Pending = false;
-                _localControlState.R1Pending = false;
-            }
-
-            if (l1Rising)
-            {
-                _localControlState.L1Pending = true;
-            }
-
             if (r1Rising)
             {
-                _localControlState.R1Pending = true;
+                if (!l1Pressed)
+                {
+                    _localControlState.MainLightOn = !_localControlState.MainLightOn;
+                }
             }
 
             if (comboHeld)
             {
                 _localControlState.ComboLatched = true;
-                _localControlState.L1Pending = false;
-                _localControlState.R1Pending = false;
-            }
-
-            if (r1Falling && _localControlState.R1Pending && !_localControlState.ComboLatched)
-            {
-                _localControlState.MainLightOn = !_localControlState.MainLightOn;
-                _localControlState.R1Pending = false;
             }
 
             if (l1Falling)
             {
-                _localControlState.L1Pending = false;
+                _localControlState.ComboLatched = false;
+            }
+
+            if (!l1Pressed && !r1Pressed)
+            {
+                _localControlState.ComboLatched = false;
             }
 
             if (psRising)
@@ -889,6 +904,11 @@ public sealed class SenderService : IDisposable
         public static readonly TelemetrySnapshot Empty = new(0, 0, 0, 0, 0, 0);
     }
 
+    public readonly record struct RawInputSnapshot(string PressedButtons)
+    {
+        public static readonly RawInputSnapshot Empty = new("-");
+    }
+
     public readonly record struct VehicleTelemetrySnapshot(
         bool LinkActive,
         bool VehicleStatusValid,
@@ -966,8 +986,6 @@ public sealed class SenderService : IDisposable
         public bool PrevL1Pressed { get; set; }
         public bool PrevR1Pressed { get; set; }
         public bool PrevPsPressed { get; set; }
-        public bool L1Pending { get; set; }
-        public bool R1Pending { get; set; }
         public bool ComboLatched { get; set; }
     }
 

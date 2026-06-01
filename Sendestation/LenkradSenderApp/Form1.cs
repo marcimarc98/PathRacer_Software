@@ -645,12 +645,14 @@ public partial class Form1 : Form
 
     private void UpdateStatus()
     {
+        _senderService.RefreshLocalPreview();
+        var rawInput = _senderService.LastRawInput;
         labelWheelValue.Text = _senderService.IsWheelRunning
             ? $"{_senderService.WheelName} (aktiv)"
             : _probedWheelName;
         labelSenderValue.Text = _senderService.IsEspConnected ? "Verbunden" : "Getrennt";
         labelPacketsValue.Text = _senderService.PacketCount.ToString();
-        labelStateValue.Text = _senderService.StatusText;
+        labelStateValue.Text = $"{_senderService.StatusText} | BTN: {rawInput.PressedButtons}";
         var telemetry = _senderService.LastTelemetry;
         labelSteeringLiveValue.Text = telemetry.SteeringRaw.ToString();
         labelGasLiveValue.Text = telemetry.GasRaw.ToString();
