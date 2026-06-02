@@ -339,15 +339,20 @@ static void update_transmission_state(
       s_transmission_state = TRANSMISSION_STATE_DRIVE;
       s_vehicle_control.gear = VEHICLE_GEAR_DRIVE;
       s_vehicle_control.neutral_locked = false;
+      stop_reverse_prime();
       break;
 
     case VEHICLE_GEAR_REVERSE:
       s_transmission_state = TRANSMISSION_STATE_REVERSE;
       s_vehicle_control.gear = VEHICLE_GEAR_REVERSE;
       s_vehicle_control.neutral_locked = false;
-      if (previous_gear != VEHICLE_GEAR_REVERSE)
+      if (previous_gear == VEHICLE_GEAR_NEUTRAL)
       {
         start_reverse_prime();
+      }
+      else
+      {
+        stop_reverse_prime();
       }
       break;
 
