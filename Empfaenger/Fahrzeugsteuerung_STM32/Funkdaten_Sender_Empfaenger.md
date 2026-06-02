@@ -29,6 +29,9 @@ Aktiv verwendete Pins:
 | CRSF TX zum ELRS-Empfaenger | `PA9` | `D1`, `CN3 Pin 1` |
 | Lenkservo PWM | `PA6` | `A5`, `CN4 Pin 7` |
 | ESC PWM | `PA7` | `A6`, `CN4 Pin 6` |
+| Diff vorne PWM | `PB0` | `D3` |
+| Diff hinten PWM | `PB1` | `D6` |
+| Kamera-Schwenkservo PWM | `PA8` | `D9` |
 | Hauptlicht | `PB4` | `D12`, `CN4 Pin 14` |
 | Bremslicht | `PB5` | `D11`, `CN4 Pin 13` |
 | SWDIO | `PA13` | SWD Debug |
@@ -59,7 +62,7 @@ Aktuell genutzt und fuer Erweiterungen vorgesehen:
 | ESC | `A6` | `PA7` | `TIM3_CH2` |
 | Diff vorne | `D3` | `PB0` | `TIM3_CH3` |
 | Diff hinten | `D6` | `PB1` | `TIM3_CH4` |
-| Kamera-Schwenkservo | `D7` | `PA8` | `TIM1_CH1` |
+| Kamera-Schwenkservo | `D9` | `PA8` | `TIM1_CH1` |
 
 ## Host-Paket PC -> ESP32
 
@@ -90,18 +93,43 @@ Feste Zuordnung in der App:
 - `Axis RZ` = Gas
 - `Button 0..12` = Host-Buttons
 
-Die App verarbeitet die physischen Lenkrad-Buttons lokal zu fertigen Soll-Zustaenden.
-An ESP32 und STM32 gehen nur noch diese logischen Zustandsbits:
+Neue direkte Bedienung:
 
-| Receiver-Button | Host-Bit | Funktion |
-|---|---|---|
-| 0 | 0 | Sollzustand Rueckwaerts |
-| 1 | 1 | Sollzustand Vorwaerts |
-| 2 | 2 | Kamera hinten aktiv |
-| 3 | 3 | Sportmodus aktiv |
-| 4 | 4 | Lichthupe aktiv |
-| 5 | 5 | Hauptlicht ein |
-| 6 | 6 | Neutral freigegeben |
+- `Button 7` = Kamera +30 Grad
+- `Button 6` = Kamera -30 Grad
+- `Button 3` = Diff vorne sperren
+- `Button 5` = Diff vorne entsperren
+- `Button 2` = Diff hinten sperren
+- `Button 4` = Diff hinten entsperren
+
+Die App verarbeitet die physischen Lenkrad-Buttons lokal zu fertigen Soll-Zustaenden.
+An ESP32 und STM32 geht nur noch ein gepacktes 11-Bit-Steuerwort:
+
+| Host-Feld | Funktion |
+|---|---|
+| Bit 0 | Sollzustand Rueckwaerts |
+| Bit 1 | Sollzustand Vorwaerts |
+| Bit 2 | Kamera hinten aktiv |
+| Bit 3 | Normalmodus aktiv |
+| Bit 4 | Lichthupe aktiv |
+| Bit 5 | Hauptlicht ein |
+| Bit 6 | Diff vorne gesperrt |
+| Bit 7 | Diff hinten gesperrt |
+| Bit 8..10 | Kamera-Schwenkwinkel-Code |
+
+Kamera-Schwenkwinkel-Code:
+
+| Code | Winkel |
+|---|---|
+| 1 | `-90 Grad` |
+| 2 | `-60 Grad` |
+| 3 | `-30 Grad` |
+| 4 | `0 Grad` |
+| 5 | `+30 Grad` |
+| 6 | `+60 Grad` |
+| 7 | `+90 Grad` |
+
+Code `0` wird nicht als Sollwert erzeugt und am Empfaenger wie Mittelstellung behandelt.
 
 ## CRSF-Kanalbelegung
 
@@ -112,19 +140,24 @@ Der ESP32-Sender erzeugt ein standardkonformes CRSF-RC-Frame mit 16 Kanaelen:
 | CH1 / Index 0 | Lenkung |
 | CH2 / Index 1 | Gas |
 | CH3 / Index 2 | Bremse |
-| CH4 / Index 3 | Sollzustand Rueckwaerts |
-| CH5 / Index 4 | Sollzustand Vorwaerts |
-| CH6 / Index 5 | Kamera hinten aktiv |
-| CH7 / Index 6 | Sportmodus aktiv |
-| CH8 / Index 7 | Lichthupe aktiv |
-| CH9 / Index 8 | Hauptlicht ein |
-| CH10 / Index 9 | Neutral freigegeben |
-| CH11..CH16 | unbenutzt |
+| CH4 / Index 3 | segmentiertes Steuerwortsymbol |
+| CH5..CH16 | unbenutzt, auf CRSF Minimum |
 
-Buttons werden digital uebertragen:
+Das logische Steuerwort entspricht dem Host-Buttonwort:
 
-- `false` -> CRSF Minimum
-- `true` -> CRSF Maximum
+- Bits `0..7`: logische Fahrzeugzustaende
+- Bits `8..10`: Kamera-Schwenkwinkel-Code
+
+Dieses 11-Bit-Steuerwort wird nicht direkt als Rohwert auf `CH4` gelegt, weil die unteren
+Kanalbits ueber ELRS nicht stabil genug fuer digitale Schaltbits sind. Der ESP32 sendet
+stattdessen auf `CH4` zyklisch ein robustes Symbol:
+
+- 4 Segmente mit je 3 Nutzbits
+- Symbolnummer = `(Segment << 3) | Payload`
+- CRSF-Wert = `220 + Symbolnummer * 48`
+
+Der STM32 setzt daraus wieder das 11-Bit-Steuerwort zusammen. Es werden weiterhin keine
+separaten CRSF-Kanaele fuer einzelne Buttons genutzt.
 
 ## CRSF <-> us Mapping
 
@@ -134,7 +167,10 @@ Im Empfaenger werden Lenkung, Gas und Bremse auf Pulsweiten umgerechnet:
 - kleiner als Mitte = unter `1500 us`
 - groesser als Mitte = ueber `1500 us`
 
-Die Buttons werden als gedrueckt erkannt, wenn der Kanalwert oberhalb der Mitte liegt.
+Das Steuerwort wird aus den `CH4`-Segmenten zusammengesetzt:
+
+- untere 8 Bits = logische Fahrzeugzustaende
+- obere 3 Bits = Kamera-Schwenkwinkel-Code
 
 ## Implementierte Fahrzeugfunktionen
 
@@ -161,7 +197,10 @@ Im aktuellen STM32-Stand sind implementiert:
 - in `Normal`: progressive Gas- und progressive Lenkkennlinie
 - Rueckwaerts-Geschwindigkeitslimit
 - zustandsgetriebene Kamera vorne/hinten
+- zustandsgetriebener Kamera-Schwenkwinkel von `-90` bis `+90 Grad`
 - invertierte Lenkung bei aktiver Rueckfahrkamera
+- zustandsgetriebene Diff-Sperre vorne
+- zustandsgetriebene Diff-Sperre hinten
 - zustandsgetriebenes Hauptlicht
 - zustandsgetriebene Lichthupe
 - Bremslicht aktiv bei gedrueckter Bremse
@@ -173,12 +212,14 @@ Im aktuellen STM32-Stand sind implementiert:
 Die App verarbeitet die physische Bedienung lokal und sendet nur fertige Soll-Zustaende.
 Der STM32 setzt diese Zustande direkt um und behaelt nur die Sicherheitslogik fuer den Antrieb:
 
-- `Neutral freigegeben = 0` -> Fahrzeug bleibt verriegelt in `N`
-- `Neutral freigegeben = 1` und kein Richtungsbit -> `N` freigegeben
 - `Sollzustand Vorwaerts = 1` -> `D`
 - `Sollzustand Rueckwaerts = 1` -> `R`
-- `Sportmodus aktiv = 1` -> `Normal`, sonst `Aggressiv`
+- kein Richtungsbit -> verriegeltes `N`
+- `Normalmodus aktiv = 1` -> `Normal`, sonst `Aggressiv`
 - `Kamera hinten aktiv = 1` -> Rueckfahrkamera und invertierte Lenkung
+- `Kamera-Schwenkwinkel-Code` -> Kamera-Schwenkservo in 30-Grad-Schritten
+- `Diff vorne gesperrt = 1` -> vordere Diff-Sperre aktiv
+- `Diff hinten gesperrt = 1` -> hintere Diff-Sperre aktiv
 - `Hauptlicht ein = 1` -> Hauptlicht an
 - `Lichthupe aktiv = 1` -> Lichtausgang zusaetzlich aktiv
 - Bremse gedrueckt -> Bremslicht an
@@ -237,6 +278,10 @@ Wichtige Konstanten:
 - `BRAKE_ACTIVE_DEADBAND_US`
 - `CAMERA_PWM_FRONT_US`
 - `CAMERA_PWM_REAR_US`
+- `CAMERA_PAN_CENTER_US`
+- `CAMERA_PAN_RANGE_US`
+- `DIFF_UNLOCKED_US`
+- `DIFF_LOCKED_US`
 
 ## Relevante Code-Dateien
 

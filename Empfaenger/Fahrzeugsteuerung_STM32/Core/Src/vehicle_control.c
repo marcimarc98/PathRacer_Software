@@ -4,8 +4,7 @@
 #define BUTTON_DESIRED_REVERSE   0U
 #define BUTTON_DESIRED_DRIVE     1U
 #define BUTTON_CAMERA_REAR       2U
-#define BUTTON_SPORT_MODE        3U
-#define BUTTON_NEUTRAL_UNLOCKED  6U
+#define BUTTON_NORMAL_MODE       3U
 
 #define PEDAL_MIN_US                   1000
 #define PEDAL_MAX_US                   2000
@@ -383,14 +382,9 @@ static vehicle_gear_t get_desired_gear(const rc_state_t* rc_state)
   return reverse_selected ? VEHICLE_GEAR_REVERSE : VEHICLE_GEAR_DRIVE;
 }
 
-static bool get_desired_neutral_unlocked(const rc_state_t* rc_state)
-{
-  return rc_button_is_pressed(rc_state, BUTTON_NEUTRAL_UNLOCKED);
-}
-
 static vehicle_drive_mode_t get_desired_drive_mode(const rc_state_t* rc_state)
 {
-  return rc_button_is_pressed(rc_state, BUTTON_SPORT_MODE) ? VEHICLE_DRIVE_MODE_SPORT : VEHICLE_DRIVE_MODE_NORMAL;
+  return rc_button_is_pressed(rc_state, BUTTON_NORMAL_MODE) ? VEHICLE_DRIVE_MODE_NORMAL : VEHICLE_DRIVE_MODE_SPORT;
 }
 
 static bool get_desired_camera_rear_active(const rc_state_t* rc_state)
@@ -425,12 +419,15 @@ void vehicle_control_get_status(vehicle_command_t* out_command)
   out_command->drive_mode = s_vehicle_control.drive_mode;
   out_command->neutral_locked = s_vehicle_control.neutral_locked;
   out_command->camera_rear_active = s_vehicle_control.camera_rear_active;
+  out_command->camera_pan_angle_deg = 0;
+  out_command->diff_front_locked = false;
+  out_command->diff_rear_locked = false;
 }
 
 void vehicle_control_step(const rc_state_t* rc_state, vehicle_command_t* out_command)
 {
   const vehicle_gear_t desired_gear = get_desired_gear(rc_state);
-  const bool desired_neutral_unlocked = get_desired_neutral_unlocked(rc_state);
+  const bool desired_neutral_unlocked = desired_gear != VEHICLE_GEAR_NEUTRAL;
   const vehicle_drive_mode_t desired_drive_mode = get_desired_drive_mode(rc_state);
   const bool desired_camera_rear_active = get_desired_camera_rear_active(rc_state);
 
@@ -450,4 +447,7 @@ void vehicle_control_step(const rc_state_t* rc_state, vehicle_command_t* out_com
   out_command->drive_mode = s_vehicle_control.drive_mode;
   out_command->neutral_locked = s_vehicle_control.neutral_locked;
   out_command->camera_rear_active = s_vehicle_control.camera_rear_active;
+  out_command->camera_pan_angle_deg = (rc_state != 0) ? rc_state->camera_pan_angle_deg : 0;
+  out_command->diff_front_locked = (rc_state != 0) && rc_state->diff_front_locked;
+  out_command->diff_rear_locked = (rc_state != 0) && rc_state->diff_rear_locked;
 }

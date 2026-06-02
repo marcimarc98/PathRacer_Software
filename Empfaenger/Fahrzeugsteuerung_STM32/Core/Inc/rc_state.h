@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #define RC_STATE_NUM_CHANNELS 16U
-#define RC_STATE_NUM_BUTTONS  7U
+#define RC_STATE_NUM_BUTTONS  8U
 
 typedef struct
 {
@@ -13,6 +13,9 @@ typedef struct
   int lenkung_us;
   int gas_us;
   int bremse_us;
+  int camera_pan_angle_deg;
+  bool diff_front_locked;
+  bool diff_rear_locked;
   bool knopf[RC_STATE_NUM_BUTTONS];
   uint16_t knopfmaske;
   uint32_t last_update_ms;

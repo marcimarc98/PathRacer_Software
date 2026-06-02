@@ -50,6 +50,10 @@ partial class Form1
     private Label labelVehicleTempCaption;
     private Label labelVehicleTempIcon;
     private Label labelVehicleTempValue;
+    private Label labelVehicleDiffFrontCaption;
+    private Label labelVehicleDiffFrontValue;
+    private Label labelVehicleDiffRearCaption;
+    private Label labelVehicleDiffRearValue;
     private Label labelVehicleDebugCaption;
     private Label labelVehicleDebugValue;
     private Label labelVehicleControlsCaption;
@@ -115,6 +119,10 @@ partial class Form1
         labelVehicleTempCaption = new Label();
         labelVehicleTempIcon = new Label();
         labelVehicleTempValue = new Label();
+        labelVehicleDiffFrontCaption = new Label();
+        labelVehicleDiffFrontValue = new Label();
+        labelVehicleDiffRearCaption = new Label();
+        labelVehicleDiffRearValue = new Label();
         labelVehicleDebugCaption = new Label();
         labelVehicleDebugValue = new Label();
         labelVehicleControlsCaption = new Label();
@@ -383,6 +391,10 @@ partial class Form1
         groupVehicle.Controls.Add(labelVehicleTempCaption);
         groupVehicle.Controls.Add(labelVehicleTempIcon);
         groupVehicle.Controls.Add(labelVehicleTempValue);
+        groupVehicle.Controls.Add(labelVehicleDiffFrontCaption);
+        groupVehicle.Controls.Add(labelVehicleDiffFrontValue);
+        groupVehicle.Controls.Add(labelVehicleDiffRearCaption);
+        groupVehicle.Controls.Add(labelVehicleDiffRearValue);
         groupVehicle.Controls.Add(labelVehicleDebugCaption);
         groupVehicle.Controls.Add(labelVehicleDebugValue);
         groupVehicle.Controls.Add(labelVehicleControlsCaption);
@@ -503,7 +515,7 @@ partial class Form1
         labelVehicleCameraValue.Font = new Font("Segoe UI", 18F, FontStyle.Regular, GraphicsUnit.Point, 0);
         labelVehicleCameraValue.Location = new Point(470, 152);
         labelVehicleCameraValue.Name = "labelVehicleCameraValue";
-        labelVehicleCameraValue.Size = new Size(180, 34);
+        labelVehicleCameraValue.Size = new Size(260, 34);
         labelVehicleCameraValue.TabIndex = 10;
         labelVehicleCameraValue.Text = "-";
         // 
@@ -596,6 +608,46 @@ partial class Form1
         labelVehicleTempValue.Size = new Size(180, 34);
         labelVehicleTempValue.TabIndex = 19;
         labelVehicleTempValue.Text = "--";
+        //
+        // labelVehicleDiffFrontCaption
+        //
+        labelVehicleDiffFrontCaption.AutoSize = true;
+        labelVehicleDiffFrontCaption.Font = new Font("Segoe UI", 14F, FontStyle.Bold, GraphicsUnit.Point, 0);
+        labelVehicleDiffFrontCaption.Location = new Point(24, 262);
+        labelVehicleDiffFrontCaption.Name = "labelVehicleDiffFrontCaption";
+        labelVehicleDiffFrontCaption.Size = new Size(91, 25);
+        labelVehicleDiffFrontCaption.TabIndex = 24;
+        labelVehicleDiffFrontCaption.Text = "Diff vorn:";
+        //
+        // labelVehicleDiffFrontValue
+        //
+        labelVehicleDiffFrontValue.Font = new Font("Segoe UI", 14F, FontStyle.Bold, GraphicsUnit.Point, 0);
+        labelVehicleDiffFrontValue.ForeColor = Color.ForestGreen;
+        labelVehicleDiffFrontValue.Location = new Point(145, 262);
+        labelVehicleDiffFrontValue.Name = "labelVehicleDiffFrontValue";
+        labelVehicleDiffFrontValue.Size = new Size(110, 25);
+        labelVehicleDiffFrontValue.TabIndex = 25;
+        labelVehicleDiffFrontValue.Text = "Frei";
+        //
+        // labelVehicleDiffRearCaption
+        //
+        labelVehicleDiffRearCaption.AutoSize = true;
+        labelVehicleDiffRearCaption.Font = new Font("Segoe UI", 14F, FontStyle.Bold, GraphicsUnit.Point, 0);
+        labelVehicleDiffRearCaption.Location = new Point(24, 317);
+        labelVehicleDiffRearCaption.Name = "labelVehicleDiffRearCaption";
+        labelVehicleDiffRearCaption.Size = new Size(103, 25);
+        labelVehicleDiffRearCaption.TabIndex = 26;
+        labelVehicleDiffRearCaption.Text = "Diff hinten:";
+        //
+        // labelVehicleDiffRearValue
+        //
+        labelVehicleDiffRearValue.Font = new Font("Segoe UI", 14F, FontStyle.Bold, GraphicsUnit.Point, 0);
+        labelVehicleDiffRearValue.ForeColor = Color.ForestGreen;
+        labelVehicleDiffRearValue.Location = new Point(145, 317);
+        labelVehicleDiffRearValue.Name = "labelVehicleDiffRearValue";
+        labelVehicleDiffRearValue.Size = new Size(110, 25);
+        labelVehicleDiffRearValue.TabIndex = 27;
+        labelVehicleDiffRearValue.Text = "Frei";
         // 
         // labelVehicleDebugCaption
         // 

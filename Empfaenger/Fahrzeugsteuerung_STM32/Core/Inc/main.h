@@ -73,6 +73,12 @@ void Error_Handler(void);
 #define ESC_PWM_GPIO_Port GPIOA
 #define CAMERA_PWM_Pin GPIO_PIN_0
 #define CAMERA_PWM_GPIO_Port GPIOA
+#define CAMERA_PAN_PWM_Pin GPIO_PIN_8
+#define CAMERA_PAN_PWM_GPIO_Port GPIOA
+#define DIFF_FRONT_PWM_Pin GPIO_PIN_0
+#define DIFF_FRONT_PWM_GPIO_Port GPIOB
+#define DIFF_REAR_PWM_Pin GPIO_PIN_1
+#define DIFF_REAR_PWM_GPIO_Port GPIOB
 #define LIGHT_MAIN_Pin GPIO_PIN_4
 #define LIGHT_MAIN_GPIO_Port GPIOB
 #define LIGHT_BRAKE_Pin GPIO_PIN_5

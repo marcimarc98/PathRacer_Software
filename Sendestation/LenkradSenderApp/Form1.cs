@@ -162,6 +162,12 @@ public partial class Form1 : Form
                 "PS: Sicherheits-N" + Environment.NewLine +
                 "L2: Fahrmodus Aggressiv/Normal" + Environment.NewLine +
                 "R2: Kamera vorne/hinten" + Environment.NewLine +
+                "BTN 7: Kamera +30 Grad" + Environment.NewLine +
+                "BTN 6: Kamera -30 Grad" + Environment.NewLine +
+                "BTN 3: Diff vorn sperren" + Environment.NewLine +
+                "BTN 5: Diff vorn entsperren" + Environment.NewLine +
+                "BTN 2: Diff hinten sperren" + Environment.NewLine +
+                "BTN 4: Diff hinten entsperren" + Environment.NewLine +
                 "R1: Licht ein/aus" + Environment.NewLine +
                 "L1: Lichthupe",
             Margin = new Padding(0),
@@ -671,7 +677,10 @@ public partial class Form1 : Form
     {
         labelVehicleLinkValue.Text = telemetry.LinkActive ? "Aktiv" : "Inaktiv";
         labelVehicleModeValue.Text = control.SportMode ? "Normal" : "Aggressiv";
-        labelVehicleCameraValue.Text = control.CameraRearActive ? "Hinten" : "Vorne";
+        labelVehicleCameraValue.Text =
+            $"{(control.CameraRearActive ? "Hinten" : "Vorne")} | {control.CameraPanAngleDeg:+#;-#;0} Grad";
+        SetDiffState(labelVehicleDiffFrontValue, control.FrontDiffLocked);
+        SetDiffState(labelVehicleDiffRearValue, control.RearDiffLocked);
         labelVehicleLightValue.Text = control.FlashActive
             ? (control.MainLightOn ? "Ein + Lichthupe" : "Lichthupe")
             : (control.MainLightOn ? "Ein" : "Aus");
@@ -708,6 +717,12 @@ public partial class Form1 : Form
             $"Device: {debug.DeviceInfoFrames}{Environment.NewLine}" +
             $"Last Type: 0x{debug.LastTypeHex}{Environment.NewLine}" +
             $"Valid: {(debug.Valid ? 1 : 0)}";
+    }
+
+    private static void SetDiffState(Label label, bool locked)
+    {
+        label.Text = locked ? "Sperre" : "Frei";
+        label.ForeColor = locked ? Color.Firebrick : Color.ForestGreen;
     }
 
     private void ProbeWheel()

@@ -17,6 +17,12 @@ public sealed class SenderService : IDisposable
     private const WheelAxis BrakeAxis = WheelAxis.Y;
     private const int PhysicalDownShiftButton = 0;
     private const int PhysicalUpShiftButton = 1;
+    private const int PhysicalRearDiffLockButton = 2;
+    private const int PhysicalFrontDiffLockButton = 3;
+    private const int PhysicalRearDiffUnlockButton = 4;
+    private const int PhysicalFrontDiffUnlockButton = 5;
+    private const int PhysicalCameraMinusButton = 6;
+    private const int PhysicalCameraPlusButton = 7;
     private const int PhysicalR2Button = 8;
     private const int PhysicalL2Button = 9;
     private const int PhysicalL1Button = 10;
@@ -25,10 +31,16 @@ public sealed class SenderService : IDisposable
     private const int LogicalReverseButton = 0;
     private const int LogicalDriveButton = 1;
     private const int LogicalCameraRearButton = 2;
-    private const int LogicalSportButton = 3;
+    private const int LogicalNormalModeButton = 3;
     private const int LogicalFlashButton = 4;
     private const int LogicalMainLightButton = 5;
-    private const int LogicalNeutralUnlockedButton = 6;
+    private const int LogicalFrontDiffLockedButton = 6;
+    private const int LogicalRearDiffLockedButton = 7;
+    private const int CameraAngleCodeShift = 8;
+    private const int CameraAngleMinimumDeg = -90;
+    private const int CameraAngleMaximumDeg = 90;
+    private const int CameraAngleStepDeg = 30;
+    private const ushort NeutralControlWord = (ushort)(4 << CameraAngleCodeShift);
     private const byte StatusHeader1 = 0x5A;
     private const byte StatusHeader2 = 0xA5;
     private const byte StatusPacketType = 0x31;
@@ -506,6 +518,12 @@ public sealed class SenderService : IDisposable
         {
             var downShiftPressed = IsPhysicalButtonPressed(state, PhysicalDownShiftButton);
             var upShiftPressed = IsPhysicalButtonPressed(state, PhysicalUpShiftButton);
+            var rearDiffLockPressed = IsPhysicalButtonPressed(state, PhysicalRearDiffLockButton);
+            var frontDiffLockPressed = IsPhysicalButtonPressed(state, PhysicalFrontDiffLockButton);
+            var rearDiffUnlockPressed = IsPhysicalButtonPressed(state, PhysicalRearDiffUnlockButton);
+            var frontDiffUnlockPressed = IsPhysicalButtonPressed(state, PhysicalFrontDiffUnlockButton);
+            var cameraMinusPressed = IsPhysicalButtonPressed(state, PhysicalCameraMinusButton);
+            var cameraPlusPressed = IsPhysicalButtonPressed(state, PhysicalCameraPlusButton);
             var r2Pressed = IsPhysicalButtonPressed(state, PhysicalR2Button);
             var l2Pressed = IsPhysicalButtonPressed(state, PhysicalL2Button);
             var l1Pressed = IsPhysicalButtonPressed(state, PhysicalL1Button);
@@ -514,6 +532,12 @@ public sealed class SenderService : IDisposable
 
             var downShiftRising = downShiftPressed && !_localControlState.PrevDownShiftPressed;
             var upShiftRising = upShiftPressed && !_localControlState.PrevUpShiftPressed;
+            var rearDiffLockRising = rearDiffLockPressed && !_localControlState.PrevRearDiffLockPressed;
+            var frontDiffLockRising = frontDiffLockPressed && !_localControlState.PrevFrontDiffLockPressed;
+            var rearDiffUnlockRising = rearDiffUnlockPressed && !_localControlState.PrevRearDiffUnlockPressed;
+            var frontDiffUnlockRising = frontDiffUnlockPressed && !_localControlState.PrevFrontDiffUnlockPressed;
+            var cameraMinusRising = cameraMinusPressed && !_localControlState.PrevCameraMinusPressed;
+            var cameraPlusRising = cameraPlusPressed && !_localControlState.PrevCameraPlusPressed;
             var r2Rising = r2Pressed && !_localControlState.PrevR2Pressed;
             var l2Rising = l2Pressed && !_localControlState.PrevL2Pressed;
             var l1Rising = l1Pressed && !_localControlState.PrevL1Pressed;
@@ -578,10 +602,46 @@ public sealed class SenderService : IDisposable
                 _localControlState.CameraRearActive = !_localControlState.CameraRearActive;
             }
 
+            if (cameraMinusRising)
+            {
+                _localControlState.CameraPanAngleDeg = ClampCameraAngle(_localControlState.CameraPanAngleDeg - CameraAngleStepDeg);
+            }
+
+            if (cameraPlusRising)
+            {
+                _localControlState.CameraPanAngleDeg = ClampCameraAngle(_localControlState.CameraPanAngleDeg + CameraAngleStepDeg);
+            }
+
+            if (frontDiffLockRising)
+            {
+                _localControlState.FrontDiffLocked = true;
+            }
+
+            if (frontDiffUnlockRising)
+            {
+                _localControlState.FrontDiffLocked = false;
+            }
+
+            if (rearDiffLockRising)
+            {
+                _localControlState.RearDiffLocked = true;
+            }
+
+            if (rearDiffUnlockRising)
+            {
+                _localControlState.RearDiffLocked = false;
+            }
+
             _localControlState.FlashActive = l1Pressed && !_localControlState.ComboLatched && !r1Pressed;
 
             _localControlState.PrevDownShiftPressed = downShiftPressed;
             _localControlState.PrevUpShiftPressed = upShiftPressed;
+            _localControlState.PrevRearDiffLockPressed = rearDiffLockPressed;
+            _localControlState.PrevFrontDiffLockPressed = frontDiffLockPressed;
+            _localControlState.PrevRearDiffUnlockPressed = rearDiffUnlockPressed;
+            _localControlState.PrevFrontDiffUnlockPressed = frontDiffUnlockPressed;
+            _localControlState.PrevCameraMinusPressed = cameraMinusPressed;
+            _localControlState.PrevCameraPlusPressed = cameraPlusPressed;
             _localControlState.PrevR2Pressed = r2Pressed;
             _localControlState.PrevL2Pressed = l2Pressed;
             _localControlState.PrevL1Pressed = l1Pressed;
@@ -607,7 +667,7 @@ public sealed class SenderService : IDisposable
 
             if (_localControlState.SportMode)
             {
-                buttons |= (ushort)(1 << LogicalSportButton);
+                buttons |= (ushort)(1 << LogicalNormalModeButton);
             }
 
             if (_localControlState.FlashActive)
@@ -620,16 +680,26 @@ public sealed class SenderService : IDisposable
                 buttons |= (ushort)(1 << LogicalMainLightButton);
             }
 
-            if (_localControlState.NeutralUnlocked)
+            if (_localControlState.FrontDiffLocked)
             {
-                buttons |= (ushort)(1 << LogicalNeutralUnlockedButton);
+                buttons |= (ushort)(1 << LogicalFrontDiffLockedButton);
             }
+
+            if (_localControlState.RearDiffLocked)
+            {
+                buttons |= (ushort)(1 << LogicalRearDiffLockedButton);
+            }
+
+            buttons |= EncodeCameraAngle(_localControlState.CameraPanAngleDeg);
 
             _lastControlState = new ControlStateSnapshot(
                 Gear: _localControlState.Gear,
                 NeutralUnlocked: _localControlState.NeutralUnlocked,
                 SportMode: _localControlState.SportMode,
                 CameraRearActive: _localControlState.CameraRearActive,
+                CameraPanAngleDeg: _localControlState.CameraPanAngleDeg,
+                FrontDiffLocked: _localControlState.FrontDiffLocked,
+                RearDiffLocked: _localControlState.RearDiffLocked,
                 MainLightOn: _localControlState.MainLightOn,
                 FlashActive: _localControlState.FlashActive);
 
@@ -641,6 +711,19 @@ public sealed class SenderService : IDisposable
     {
         var buttons = state.Buttons;
         return (index >= 0) && (index < buttons.Length) && buttons[index];
+    }
+
+    private static int ClampCameraAngle(int angleDeg)
+    {
+        return Math.Clamp(angleDeg, CameraAngleMinimumDeg, CameraAngleMaximumDeg);
+    }
+
+    private static ushort EncodeCameraAngle(int angleDeg)
+    {
+        var clampedAngle = ClampCameraAngle(angleDeg);
+        var angleCode = ((clampedAngle - CameraAngleMinimumDeg) / CameraAngleStepDeg) + 1;
+
+        return (ushort)(angleCode << CameraAngleCodeShift);
     }
 
     private static void WaitUntil(Stopwatch stopwatch, long targetTicks, CancellationToken cancellationToken)
@@ -775,6 +858,7 @@ public sealed class SenderService : IDisposable
         }
 
         var flags = packet[3];
+        var cameraAngleCode = (packet[18] >> 4) & 0x07;
         var gear = packet[4] switch
         {
             1 => 'N',
@@ -790,6 +874,9 @@ public sealed class SenderService : IDisposable
             SportMode: (flags & 0x02) != 0,
             MainLightOn: (flags & 0x04) != 0,
             CameraRearActive: (flags & 0x10) != 0,
+            CameraPanAngleDeg: DecodeCameraAngle(cameraAngleCode),
+            FrontDiffLocked: (flags & 0x20) != 0,
+            RearDiffLocked: (flags & 0x40) != 0,
             BatteryMv: (ushort)(packet[6] | (packet[7] << 8)),
             BatteryPercent: packet[5],
             BatteryTempC: (short)(packet[8] | (packet[9] << 8)),
@@ -802,6 +889,13 @@ public sealed class SenderService : IDisposable
             RfProfile: packet[16],
             TxPower: packet[17]);
         return true;
+    }
+
+    private static int DecodeCameraAngle(int angleCode)
+    {
+        return angleCode is >= 1 and <= 7
+            ? CameraAngleMinimumDeg + ((angleCode - 1) * CameraAngleStepDeg)
+            : 0;
     }
 
     private void ConsumeDebugByte(byte value, StringBuilder buffer)
@@ -916,6 +1010,9 @@ public sealed class SenderService : IDisposable
         bool SportMode,
         bool MainLightOn,
         bool CameraRearActive,
+        int CameraPanAngleDeg,
+        bool FrontDiffLocked,
+        bool RearDiffLocked,
         ushort BatteryMv,
         byte BatteryPercent,
         short BatteryTempC,
@@ -928,7 +1025,7 @@ public sealed class SenderService : IDisposable
         byte RfProfile,
         byte TxPower)
     {
-        public static readonly VehicleTelemetrySnapshot Empty = new(false, false, '-', false, false, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        public static readonly VehicleTelemetrySnapshot Empty = new(false, false, '-', false, false, false, 0, false, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
 
     public readonly record struct DebugTelemetrySnapshot(
@@ -955,10 +1052,13 @@ public sealed class SenderService : IDisposable
         bool NeutralUnlocked,
         bool SportMode,
         bool CameraRearActive,
+        int CameraPanAngleDeg,
+        bool FrontDiffLocked,
+        bool RearDiffLocked,
         bool MainLightOn,
         bool FlashActive)
     {
-        public static readonly ControlStateSnapshot Default = new('N', false, false, false, false, false);
+        public static readonly ControlStateSnapshot Default = new('N', false, false, false, 0, false, false, false, false);
     }
 
     private readonly record struct OutboundSnapshot(
@@ -967,7 +1067,7 @@ public sealed class SenderService : IDisposable
         ushort Brake,
         ushort Buttons)
     {
-        public static readonly OutboundSnapshot Neutral = new(0, 0, 0, 0);
+        public static readonly OutboundSnapshot Neutral = new(0, 0, 0, NeutralControlWord);
     }
 
     private sealed class LocalControlState
@@ -976,11 +1076,20 @@ public sealed class SenderService : IDisposable
         public bool NeutralUnlocked { get; set; }
         public bool SportMode { get; set; }
         public bool CameraRearActive { get; set; }
+        public int CameraPanAngleDeg { get; set; }
+        public bool FrontDiffLocked { get; set; }
+        public bool RearDiffLocked { get; set; }
         public bool MainLightOn { get; set; }
         public bool FlashActive { get; set; }
         public bool ShiftGateActive { get; set; }
         public bool PrevDownShiftPressed { get; set; }
         public bool PrevUpShiftPressed { get; set; }
+        public bool PrevRearDiffLockPressed { get; set; }
+        public bool PrevFrontDiffLockPressed { get; set; }
+        public bool PrevRearDiffUnlockPressed { get; set; }
+        public bool PrevFrontDiffUnlockPressed { get; set; }
+        public bool PrevCameraMinusPressed { get; set; }
+        public bool PrevCameraPlusPressed { get; set; }
         public bool PrevR2Pressed { get; set; }
         public bool PrevL2Pressed { get; set; }
         public bool PrevL1Pressed { get; set; }

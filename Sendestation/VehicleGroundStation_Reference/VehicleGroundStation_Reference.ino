@@ -64,7 +64,19 @@ static constexpr int LOGICAL_BUTTON_CAMERA_REAR = 2;
 static constexpr int LOGICAL_BUTTON_SPORT = 3;
 static constexpr int LOGICAL_BUTTON_FLASH = 4;
 static constexpr int LOGICAL_BUTTON_MAIN_LIGHT = 5;
-static constexpr int LOGICAL_BUTTON_NEUTRAL_UNLOCKED = 6;
+static constexpr int LOGICAL_BUTTON_FRONT_DIFF_LOCKED = 6;
+static constexpr int LOGICAL_BUTTON_REAR_DIFF_LOCKED = 7;
+static constexpr int LOGICAL_BUTTON_COUNT = 8;
+static constexpr uint16_t CONTROL_WORD_MASK = 0x07FF;
+static constexpr int CAMERA_ANGLE_CODE_SHIFT = 8;
+static constexpr uint8_t CAMERA_ANGLE_CENTER_CODE = 4;
+static constexpr uint16_t DEFAULT_CONTROL_WORD = (uint16_t)(CAMERA_ANGLE_CENTER_CODE << CAMERA_ANGLE_CODE_SHIFT);
+static constexpr int CAMERA_ANGLE_MIN_DEG = -90;
+static constexpr int CAMERA_ANGLE_STEP_DEG = 30;
+static constexpr uint8_t CONTROL_SEGMENT_COUNT = 4;
+static constexpr uint8_t CONTROL_SEGMENT_PAYLOAD_MASK = 0x07;
+static constexpr uint16_t CONTROL_SYMBOL_MIN_VALUE = 220;
+static constexpr uint16_t CONTROL_SYMBOL_STEP_VALUE = 48;
 
 // --------------------------------------------------
 // Structs
@@ -73,7 +85,9 @@ struct Steuerdaten {
     int lenkung_us;
     int gas_us;
     int bremse_us;
-    bool button[13];
+    uint16_t control_word;
+    int camera_angle_deg;
+    bool button[LOGICAL_BUTTON_COUNT];
 };
 
 struct FahrzeugStatus {
@@ -123,6 +137,8 @@ static Steuerdaten s_state = {
     .lenkung_us = 1500,
     .gas_us = 1000,
     .bremse_us = 1000,
+    .control_word = DEFAULT_CONTROL_WORD,
+    .camera_angle_deg = 0,
 };
 
 static FahrzeugStatus s_vehicle_status = {
@@ -143,6 +159,7 @@ static uint8_t s_rx_frame_idx = 0;
 static uint8_t s_rx_expected_total = 0;
 
 static bool s_crsf_tx_attached = false;
+static uint8_t s_control_segment = 0;
 
 // --------------------------------------------------
 // CRC8 Lookup Table, Poly 0xD5
@@ -221,11 +238,6 @@ static uint16_t usToCRSF(int us)
     return clampCh(v);
 }
 
-static uint16_t boolToCRSF(bool b)
-{
-    return b ? CRSF_CHANNEL_VALUE_MAX : CRSF_CHANNEL_VALUE_MIN;
-}
-
 static int normSteerToUs(int16_t steer)
 {
     return clampUs(1500 + ((int)steer / 2));
@@ -236,18 +248,31 @@ static int normPedalToUs(uint16_t pedal)
     return clampUs(1000 + (int)pedal);
 }
 
-static uint16_t channelValueForButton(const Steuerdaten *state, int button_index)
+static uint8_t cameraAngleCodeFromControlWord(uint16_t control_word)
 {
-    if ((state == nullptr) || (button_index < 0) || (button_index >= 13)) {
-        return CRSF_CHANNEL_VALUE_MIN;
+    return (uint8_t)((control_word >> CAMERA_ANGLE_CODE_SHIFT) & 0x07U);
+}
+
+static int cameraAngleDegFromCode(uint8_t angle_code)
+{
+    if ((angle_code < 1U) || (angle_code > 7U)) {
+        return 0;
     }
 
-    return boolToCRSF(state->button[button_index]);
+    return CAMERA_ANGLE_MIN_DEG + (((int)angle_code - 1) * CAMERA_ANGLE_STEP_DEG);
+}
+
+static uint16_t controlSymbolForSegment(uint16_t control_word, uint8_t segment)
+{
+    const uint8_t payload = (uint8_t)((control_word >> (segment * 3U)) & CONTROL_SEGMENT_PAYLOAD_MASK);
+    const uint8_t symbol = (uint8_t)((segment << 3U) | payload);
+
+    return (uint16_t)(CONTROL_SYMBOL_MIN_VALUE + ((uint16_t)symbol * CONTROL_SYMBOL_STEP_VALUE));
 }
 
 static bool logicalButtonActive(int button_index)
 {
-    if ((button_index < 0) || (button_index >= 13)) {
+    if ((button_index < 0) || (button_index >= LOGICAL_BUTTON_COUNT)) {
         return false;
     }
 
@@ -279,6 +304,27 @@ static bool commandedMainLight()
 static bool commandedCameraRear()
 {
     return logicalButtonActive(LOGICAL_BUTTON_CAMERA_REAR);
+}
+
+static bool commandedFrontDiffLocked()
+{
+    return logicalButtonActive(LOGICAL_BUTTON_FRONT_DIFF_LOCKED);
+}
+
+static bool commandedRearDiffLocked()
+{
+    return logicalButtonActive(LOGICAL_BUTTON_REAR_DIFF_LOCKED);
+}
+
+static uint8_t commandedCameraAngleCode()
+{
+    uint8_t angle_code = cameraAngleCodeFromControlWord(s_state.control_word);
+    return ((angle_code >= 1U) && (angle_code <= 7U)) ? angle_code : CAMERA_ANGLE_CENTER_CODE;
+}
+
+static int commandedCameraAngleDeg()
+{
+    return cameraAngleDegFromCode(commandedCameraAngleCode());
 }
 
 // --------------------------------------------------
@@ -323,16 +369,10 @@ static void fillChannels(uint16_t ch[CRSF_NUM_CHANNELS])
     ch[0] = usToCRSF(s_state.lenkung_us);
     ch[1] = usToCRSF(s_state.gas_us);
     ch[2] = usToCRSF(s_state.bremse_us);
+    ch[3] = controlSymbolForSegment(s_state.control_word & CONTROL_WORD_MASK, s_control_segment);
+    s_control_segment = (uint8_t)((s_control_segment + 1U) % CONTROL_SEGMENT_COUNT);
 
-    ch[3] = channelValueForButton(&s_state, 0);
-    ch[4] = channelValueForButton(&s_state, 1);
-    ch[5] = channelValueForButton(&s_state, 2);
-    ch[6] = channelValueForButton(&s_state, 3);
-    ch[7] = channelValueForButton(&s_state, 4);
-    ch[8] = channelValueForButton(&s_state, 5);
-    ch[9] = channelValueForButton(&s_state, 6);
-
-    for (int i = 10; i < CRSF_NUM_CHANNELS; ++i) {
+    for (int i = 4; i < CRSF_NUM_CHANNELS; ++i) {
         ch[i] = UNUSED_BUTTON_CHANNEL_VALUE;
     }
 }
@@ -644,6 +684,8 @@ static void sendVehicleStatusToHost()
     if (commandedMainLight()) flags |= 0x04;
     if (vehicle_status_valid) flags |= 0x08;
     if (commandedCameraRear()) flags |= 0x10;
+    if (commandedFrontDiffLocked()) flags |= 0x20;
+    if (commandedRearDiffLocked()) flags |= 0x40;
 
     packet[0] = STATUS_HEADER_1;
     packet[1] = STATUS_HEADER_2;
@@ -668,7 +710,7 @@ static void sendVehicleStatusToHost()
 
     packet[16] = s_vehicle_status.rf_profile;
     packet[17] = s_vehicle_status.tx_power;
-    packet[18] = s_vehicle_status.sequence++;
+    packet[18] = (uint8_t)((s_vehicle_status.sequence++ & 0x0FU) | (commandedCameraAngleCode() << 4));
 
     for (size_t i = 0; i < STATUS_PACKET_SIZE - 1; ++i) {
         checksum ^= packet[i];
@@ -700,7 +742,7 @@ static void sendDebugLine()
     snprintf(
         line,
         sizeof(line),
-        "!dbg host=%lu rx=%lu frm=%lu crc=%lu fm=%lu bat=%lu ls=%lu dev=%lu last=%02X valid=%u gear=%c mv=%u pct=%u tmp=%d ulq=%u urssi=%u usnr=%d dlq=%u drssi=%u dsnr=%d\n",
+        "!dbg host=%lu rx=%lu frm=%lu crc=%lu fm=%lu bat=%lu ls=%lu dev=%lu last=%02X valid=%u gear=%c mv=%u pct=%u tmp=%d ulq=%u urssi=%u usnr=%d dlq=%u drssi=%u dsnr=%d ctl=%u cam=%d df=%u dr=%u\n",
         (unsigned long)s_debug_stats.host_packets_decoded,
         (unsigned long)s_debug_stats.telemetry_bytes_seen,
         (unsigned long)s_debug_stats.telemetry_frames_seen,
@@ -720,7 +762,11 @@ static void sendDebugLine()
         (int)s_vehicle_status.uplink_snr,
         (unsigned int)s_vehicle_status.downlink_lq,
         (unsigned int)s_vehicle_status.downlink_rssi,
-        (int)s_vehicle_status.downlink_snr
+        (int)s_vehicle_status.downlink_snr,
+        (unsigned int)(s_state.control_word & CONTROL_WORD_MASK),
+        commandedCameraAngleDeg(),
+        commandedFrontDiffLocked() ? 1U : 0U,
+        commandedRearDiffLocked() ? 1U : 0U
     );
 
     if (Serial.availableForWrite() >= (int)strlen(line)) {
@@ -756,8 +802,10 @@ static bool decodeHostPacket(const uint8_t *packet, Steuerdaten &out_state)
     out_state.lenkung_us = normSteerToUs(steer);
     out_state.gas_us = normPedalToUs(throttle);
     out_state.bremse_us = normPedalToUs(brake);
+    out_state.control_word = buttons & CONTROL_WORD_MASK;
+    out_state.camera_angle_deg = cameraAngleDegFromCode(cameraAngleCodeFromControlWord(out_state.control_word));
 
-    for (int i = 0; i < 13; ++i) {
+    for (int i = 0; i < LOGICAL_BUTTON_COUNT; ++i) {
         out_state.button[i] = ((buttons >> i) & 0x01U) != 0;
     }
 

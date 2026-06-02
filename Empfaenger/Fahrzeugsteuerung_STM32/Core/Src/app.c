@@ -27,7 +27,13 @@ static void app_run_control_cycle(void)
   {
     lights_control_step(&rc_state, now_ms, &lights_state);
     vehicle_control_step(&rc_state, &vehicle_command);
-    drive_pwm_apply(vehicle_command.lenkung_us, vehicle_command.esc_us, vehicle_command.camera_rear_active);
+    drive_pwm_apply(
+        vehicle_command.lenkung_us,
+        vehicle_command.esc_us,
+        vehicle_command.camera_rear_active,
+        vehicle_command.camera_pan_angle_deg,
+        vehicle_command.diff_front_locked,
+        vehicle_command.diff_rear_locked);
   }
   else
   {

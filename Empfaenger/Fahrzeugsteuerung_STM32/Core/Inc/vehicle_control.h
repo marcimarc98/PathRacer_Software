@@ -27,6 +27,9 @@ typedef struct
   vehicle_drive_mode_t drive_mode;
   bool neutral_locked;
   bool camera_rear_active;
+  int camera_pan_angle_deg;
+  bool diff_front_locked;
+  bool diff_rear_locked;
 } vehicle_command_t;
 
 void vehicle_control_init(void);
