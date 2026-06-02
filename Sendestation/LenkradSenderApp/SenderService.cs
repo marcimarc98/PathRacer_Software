@@ -40,6 +40,7 @@ public sealed class SenderService : IDisposable
     private const int CameraAngleMinimumDeg = -90;
     private const int CameraAngleMaximumDeg = 90;
     private const int CameraAngleStepDeg = 30;
+    private const int CameraButtonDebounceMs = 120;
     private const ushort NeutralControlWord = (ushort)(4 << CameraAngleCodeShift);
     private const byte StatusHeader1 = 0x5A;
     private const byte StatusHeader2 = 0xA5;
@@ -529,6 +530,7 @@ public sealed class SenderService : IDisposable
             var l1Pressed = IsPhysicalButtonPressed(state, PhysicalL1Button);
             var r1Pressed = IsPhysicalButtonPressed(state, PhysicalR1Button);
             var psPressed = IsPhysicalButtonPressed(state, PhysicalPsButton);
+            var nowTicks = Stopwatch.GetTimestamp();
 
             var downShiftRising = downShiftPressed && !_localControlState.PrevDownShiftPressed;
             var upShiftRising = upShiftPressed && !_localControlState.PrevUpShiftPressed;
@@ -536,8 +538,14 @@ public sealed class SenderService : IDisposable
             var frontDiffLockRising = frontDiffLockPressed && !_localControlState.PrevFrontDiffLockPressed;
             var rearDiffUnlockRising = rearDiffUnlockPressed && !_localControlState.PrevRearDiffUnlockPressed;
             var frontDiffUnlockRising = frontDiffUnlockPressed && !_localControlState.PrevFrontDiffUnlockPressed;
-            var cameraMinusRising = cameraMinusPressed && !_localControlState.PrevCameraMinusPressed;
-            var cameraPlusRising = cameraPlusPressed && !_localControlState.PrevCameraPlusPressed;
+            var cameraMinusRising =
+                cameraMinusPressed &&
+                !_localControlState.PrevCameraMinusPressed &&
+                DebounceElapsed(nowTicks, _localControlState.LastCameraMinusTicks, CameraButtonDebounceMs);
+            var cameraPlusRising =
+                cameraPlusPressed &&
+                !_localControlState.PrevCameraPlusPressed &&
+                DebounceElapsed(nowTicks, _localControlState.LastCameraPlusTicks, CameraButtonDebounceMs);
             var r2Rising = r2Pressed && !_localControlState.PrevR2Pressed;
             var l2Rising = l2Pressed && !_localControlState.PrevL2Pressed;
             var l1Rising = l1Pressed && !_localControlState.PrevL1Pressed;
@@ -605,11 +613,13 @@ public sealed class SenderService : IDisposable
             if (cameraMinusRising)
             {
                 _localControlState.CameraPanAngleDeg = ClampCameraAngle(_localControlState.CameraPanAngleDeg - CameraAngleStepDeg);
+                _localControlState.LastCameraMinusTicks = nowTicks;
             }
 
             if (cameraPlusRising)
             {
                 _localControlState.CameraPanAngleDeg = ClampCameraAngle(_localControlState.CameraPanAngleDeg + CameraAngleStepDeg);
+                _localControlState.LastCameraPlusTicks = nowTicks;
             }
 
             if (frontDiffLockRising)
@@ -724,6 +734,17 @@ public sealed class SenderService : IDisposable
         var angleCode = ((clampedAngle - CameraAngleMinimumDeg) / CameraAngleStepDeg) + 1;
 
         return (ushort)(angleCode << CameraAngleCodeShift);
+    }
+
+    private static bool DebounceElapsed(long nowTicks, long lastTicks, int debounceMs)
+    {
+        if (lastTicks <= 0)
+        {
+            return true;
+        }
+
+        var elapsedMs = (nowTicks - lastTicks) * 1000.0 / Stopwatch.Frequency;
+        return elapsedMs >= debounceMs;
     }
 
     private static void WaitUntil(Stopwatch stopwatch, long targetTicks, CancellationToken cancellationToken)
@@ -1090,6 +1111,8 @@ public sealed class SenderService : IDisposable
         public bool PrevFrontDiffUnlockPressed { get; set; }
         public bool PrevCameraMinusPressed { get; set; }
         public bool PrevCameraPlusPressed { get; set; }
+        public long LastCameraMinusTicks { get; set; }
+        public long LastCameraPlusTicks { get; set; }
         public bool PrevR2Pressed { get; set; }
         public bool PrevL2Pressed { get; set; }
         public bool PrevL1Pressed { get; set; }

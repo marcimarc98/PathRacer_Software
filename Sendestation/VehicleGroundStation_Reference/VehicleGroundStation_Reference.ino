@@ -264,7 +264,26 @@ static int cameraAngleDegFromCode(uint8_t angle_code)
 
 static uint16_t controlSymbolForSegment(uint16_t control_word, uint8_t segment)
 {
-    const uint8_t payload = (uint8_t)((control_word >> (segment * 3U)) & CONTROL_SEGMENT_PAYLOAD_MASK);
+    uint8_t payload = 0;
+
+    switch (segment) {
+        case 0:
+            payload = (uint8_t)(control_word & 0x07U);
+            break;
+        case 1:
+            payload = (uint8_t)((control_word >> 3U) & 0x07U);
+            break;
+        case 2:
+            payload = (uint8_t)((control_word >> 6U) & 0x03U);
+            break;
+        case 3:
+            payload = (uint8_t)((control_word >> CAMERA_ANGLE_CODE_SHIFT) & CONTROL_SEGMENT_PAYLOAD_MASK);
+            break;
+        default:
+            payload = 0;
+            break;
+    }
+
     const uint8_t symbol = (uint8_t)((segment << 3U) | payload);
 
     return (uint16_t)(CONTROL_SYMBOL_MIN_VALUE + ((uint16_t)symbol * CONTROL_SYMBOL_STEP_VALUE));

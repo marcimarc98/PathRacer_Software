@@ -111,9 +111,32 @@ static uint16_t update_segmented_control_word(uint16_t value)
     return s_segmented_control_word;
   }
 
-  mask = (uint16_t)(0x07U << (segment * 3U));
-  s_segmented_control_word =
-      (uint16_t)((s_segmented_control_word & (uint16_t)~mask) | ((uint16_t)payload << (segment * 3U)));
+  switch (segment)
+  {
+    case 0U:
+      mask = 0x0007U;
+      s_segmented_control_word =
+          (uint16_t)((s_segmented_control_word & (uint16_t)~mask) | ((uint16_t)payload & 0x0007U));
+      break;
+    case 1U:
+      mask = 0x0038U;
+      s_segmented_control_word =
+          (uint16_t)((s_segmented_control_word & (uint16_t)~mask) | (((uint16_t)payload & 0x0007U) << 3U));
+      break;
+    case 2U:
+      mask = 0x00C0U;
+      s_segmented_control_word =
+          (uint16_t)((s_segmented_control_word & (uint16_t)~mask) | (((uint16_t)payload & 0x0003U) << 6U));
+      break;
+    case 3U:
+      mask = 0x0700U;
+      s_segmented_control_word =
+          (uint16_t)((s_segmented_control_word & (uint16_t)~mask) | (((uint16_t)payload & 0x0007U) << RC_CAMERA_CODE_SHIFT));
+      break;
+    default:
+      break;
+  }
+
   s_segmented_control_word = crsf_to_control_word(s_segmented_control_word);
 
   return s_segmented_control_word;

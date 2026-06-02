@@ -57,7 +57,7 @@ static int clamp_camera_angle_deg(int angle_deg)
 static uint32_t camera_angle_to_us(int angle_deg)
 {
   const int clamped_angle_deg = clamp_camera_angle_deg(angle_deg);
-  return (uint32_t)(CAMERA_PAN_CENTER_US + ((clamped_angle_deg * CAMERA_PAN_RANGE_US) / CAMERA_PAN_MAX_DEG));
+  return (uint32_t)(CAMERA_PAN_CENTER_US - ((clamped_angle_deg * CAMERA_PAN_RANGE_US) / CAMERA_PAN_MAX_DEG));
 }
 
 static uint32_t diff_state_to_us(bool locked)

@@ -153,6 +153,10 @@ Kanalbits ueber ELRS nicht stabil genug fuer digitale Schaltbits sind. Der ESP32
 stattdessen auf `CH4` zyklisch ein robustes Symbol:
 
 - 4 Segmente mit je 3 Nutzbits
+- Segment 0: Bits `0..2`
+- Segment 1: Bits `3..5`
+- Segment 2: Bits `6..7`, drittes Nutzbit unbenutzt
+- Segment 3: Kamera-Schwenkwinkel-Code komplett
 - Symbolnummer = `(Segment << 3) | Payload`
 - CRSF-Wert = `220 + Symbolnummer * 48`
 
