@@ -69,10 +69,11 @@ static constexpr int LOGICAL_BUTTON_REAR_DIFF_LOCKED = 7;
 static constexpr int LOGICAL_BUTTON_COUNT = 8;
 static constexpr uint16_t CONTROL_WORD_MASK = 0x07FF;
 static constexpr int CAMERA_ANGLE_CODE_SHIFT = 8;
-static constexpr uint8_t CAMERA_ANGLE_CENTER_CODE = 4;
+static constexpr uint8_t CAMERA_ANGLE_CENTER_CODE = 3;
+static constexpr uint8_t CAMERA_ANGLE_MAX_CODE = 5;
 static constexpr uint16_t DEFAULT_CONTROL_WORD = (uint16_t)(CAMERA_ANGLE_CENTER_CODE << CAMERA_ANGLE_CODE_SHIFT);
 static constexpr int CAMERA_ANGLE_MIN_DEG = -90;
-static constexpr int CAMERA_ANGLE_STEP_DEG = 30;
+static constexpr int CAMERA_ANGLE_STEP_DEG = 45;
 static constexpr uint8_t CONTROL_SEGMENT_COUNT = 4;
 static constexpr uint8_t CONTROL_SEGMENT_PAYLOAD_MASK = 0x07;
 static constexpr uint16_t CONTROL_SYMBOL_MIN_VALUE = 220;
@@ -255,7 +256,7 @@ static uint8_t cameraAngleCodeFromControlWord(uint16_t control_word)
 
 static int cameraAngleDegFromCode(uint8_t angle_code)
 {
-    if ((angle_code < 1U) || (angle_code > 7U)) {
+    if ((angle_code < 1U) || (angle_code > CAMERA_ANGLE_MAX_CODE)) {
         return 0;
     }
 
@@ -338,7 +339,7 @@ static bool commandedRearDiffLocked()
 static uint8_t commandedCameraAngleCode()
 {
     uint8_t angle_code = cameraAngleCodeFromControlWord(s_state.control_word);
-    return ((angle_code >= 1U) && (angle_code <= 7U)) ? angle_code : CAMERA_ANGLE_CENTER_CODE;
+    return ((angle_code >= 1U) && (angle_code <= CAMERA_ANGLE_MAX_CODE)) ? angle_code : CAMERA_ANGLE_CENTER_CODE;
 }
 
 static int commandedCameraAngleDeg()

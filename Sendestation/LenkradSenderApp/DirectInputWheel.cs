@@ -39,12 +39,6 @@ public sealed class DirectInputWheel : IDisposable
         _joystick.Acquire();
     }
 
-    public static string? ProbePreferredDeviceName()
-    {
-        using var directInput = new DirectInput();
-        return GetAvailableDevices(directInput).FirstOrDefault()?.InstanceName;
-    }
-
     private static List<DeviceInstance> GetAvailableDevices(DirectInput directInput)
     {
         return directInput

@@ -95,8 +95,8 @@ Feste Zuordnung in der App:
 
 Neue direkte Bedienung:
 
-- `Button 7` = Kamera +30 Grad
-- `Button 6` = Kamera -30 Grad
+- `Button 7` = Kamera +45 Grad
+- `Button 6` = Kamera -45 Grad
 - `Button 3` = Diff vorne sperren
 - `Button 5` = Diff vorne entsperren
 - `Button 2` = Diff hinten sperren
@@ -122,12 +122,10 @@ Kamera-Schwenkwinkel-Code:
 | Code | Winkel |
 |---|---|
 | 1 | `-90 Grad` |
-| 2 | `-60 Grad` |
-| 3 | `-30 Grad` |
-| 4 | `0 Grad` |
-| 5 | `+30 Grad` |
-| 6 | `+60 Grad` |
-| 7 | `+90 Grad` |
+| 2 | `-45 Grad` |
+| 3 | `0 Grad` |
+| 4 | `+45 Grad` |
+| 5 | `+90 Grad` |
 
 Code `0` wird nicht als Sollwert erzeugt und am Empfaenger wie Mittelstellung behandelt.
 
@@ -221,7 +219,7 @@ Der STM32 setzt diese Zustande direkt um und behaelt nur die Sicherheitslogik fu
 - kein Richtungsbit -> verriegeltes `N`
 - `Normalmodus aktiv = 1` -> `Normal`, sonst `Aggressiv`
 - `Kamera hinten aktiv = 1` -> Rueckfahrkamera und invertierte Lenkung
-- `Kamera-Schwenkwinkel-Code` -> Kamera-Schwenkservo in 30-Grad-Schritten
+- `Kamera-Schwenkwinkel-Code` -> Kamera-Schwenkservo in 45-Grad-Schritten
 - `Diff vorne gesperrt = 1` -> vordere Diff-Sperre aktiv
 - `Diff hinten gesperrt = 1` -> hintere Diff-Sperre aktiv
 - `Hauptlicht ein = 1` -> Hauptlicht an

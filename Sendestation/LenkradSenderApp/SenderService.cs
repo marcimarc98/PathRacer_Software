@@ -37,11 +37,19 @@ public sealed class SenderService : IDisposable
     private const int LogicalFrontDiffLockedButton = 6;
     private const int LogicalRearDiffLockedButton = 7;
     private const int CameraAngleCodeShift = 8;
+    private const int CameraAngleCenterCode = 3;
+    private const int CameraAngleMaximumCode = 5;
     private const int CameraAngleMinimumDeg = -90;
     private const int CameraAngleMaximumDeg = 90;
-    private const int CameraAngleStepDeg = 30;
+    private const int CameraAngleStepDeg = 45;
     private const int CameraButtonDebounceMs = 120;
-    private const ushort NeutralControlWord = (ushort)(4 << CameraAngleCodeShift);
+    private const int LightLongPressMs = 450;
+    private const int FlashBlinkOnMs = 160;
+    private const int FlashBlinkOffMs = 140;
+    private const int SpeedLimitDefaultPercent = 100;
+    private const int SpeedLimitMinimumPercent = 0;
+    private const int SpeedLimitMaximumPercent = 100;
+    private const ushort NeutralControlWord = (ushort)(CameraAngleCenterCode << CameraAngleCodeShift);
     private const byte StatusHeader1 = 0x5A;
     private const byte StatusHeader2 = 0xA5;
     private const byte StatusPacketType = 0x31;
@@ -49,7 +57,6 @@ public sealed class SenderService : IDisposable
 
     private SerialPort? _serialPort;
     private DirectInputWheel? _wheel;
-    private DirectInputWheel? _previewWheel;
     private CancellationTokenSource? _wheelCts;
     private CancellationTokenSource? _espCts;
     private Task? _wheelTask;
@@ -71,15 +78,17 @@ public sealed class SenderService : IDisposable
     private ControlStateSnapshot _lastControlState = ControlStateSnapshot.Default;
     private readonly object _outboundLock = new();
     private OutboundSnapshot _lastOutbound = OutboundSnapshot.Neutral;
+    private int _speedLimitPercent = LoadSpeedLimitPercent();
 
     public event Action<string>? StatusMessage;
 
     public bool IsRunning => IsWheelRunning || IsEspConnected;
     public bool IsWheelRunning => _wheel is not null && _wheelCts is { IsCancellationRequested: false };
     public bool IsEspConnected => _serialPort is { IsOpen: true } && _espCts is { IsCancellationRequested: false };
-    public string WheelName => _wheel?.DeviceName ?? _previewWheel?.DeviceName ?? "Nicht verbunden";
+    public string WheelName => _wheel?.DeviceName ?? "Nicht verbunden";
     public string StatusText => _statusText;
     public long PacketCount => Interlocked.Read(ref _packetCount);
+    public int SpeedLimitPercent => Volatile.Read(ref _speedLimitPercent);
     public TelemetrySnapshot LastTelemetry
     {
         get
@@ -135,31 +144,6 @@ public sealed class SenderService : IDisposable
         }
     }
 
-    public void Start(string portName)
-    {
-        var startedWheel = false;
-
-        if (!IsWheelRunning)
-        {
-            StartWheel();
-            startedWheel = true;
-        }
-
-        try
-        {
-            ConnectEsp(portName);
-        }
-        catch
-        {
-            if (startedWheel)
-            {
-                StopWheel();
-            }
-
-            throw;
-        }
-    }
-
     public void StartWheel()
     {
         if (IsWheelRunning)
@@ -173,8 +157,6 @@ public sealed class SenderService : IDisposable
 
         try
         {
-            _previewWheel?.Dispose();
-            _previewWheel = null;
             _wheel?.Dispose();
             _wheel = new DirectInputWheel();
 
@@ -310,30 +292,6 @@ public sealed class SenderService : IDisposable
     {
         DisconnectEsp();
         StopWheel();
-
-        _previewWheel?.Dispose();
-        _previewWheel = null;
-    }
-
-    public void RefreshLocalPreview()
-    {
-        if (IsWheelRunning)
-        {
-            return;
-        }
-
-        try
-        {
-            _previewWheel ??= new DirectInputWheel();
-            var state = _previewWheel.Poll();
-
-            PublishWheelState(state, updateOutbound: false);
-        }
-        catch
-        {
-            _previewWheel?.Dispose();
-            _previewWheel = null;
-        }
     }
 
     private void WheelLoop(CancellationToken cancellationToken)
@@ -463,7 +421,7 @@ public sealed class SenderService : IDisposable
         var brakeRaw = DirectInputWheel.ReadAxis(state, BrakeAxis);
 
         var steering = ToArchiveSteering(steeringRaw);
-        var gas = ToArchiveGas(gasRaw);
+        var gasInput = ToArchiveGas(gasRaw);
         var brake = ToArchiveBrake(brakeRaw);
         var pressedButtons = string.Join(",",
             state.Buttons
@@ -471,6 +429,7 @@ public sealed class SenderService : IDisposable
                 .Where(item => item.pressed)
                 .Select(item => item.index));
         var buttons = BuildLogicalButtons(state);
+        var gas = ApplyDriveSpeedLimit(gasInput, buttons);
 
         SetTelemetry(new TelemetrySnapshot(steering, gas, brake, steeringRaw, gasRaw, brakeRaw));
         SetRawInput(new RawInputSnapshot(pressedButtons.Length == 0 ? "-" : pressedButtons));
@@ -501,6 +460,79 @@ public sealed class SenderService : IDisposable
         var pedal = (1000 - raw) / 2;
         return (ushort)Math.Clamp(pedal, 0, 1000);
     }
+
+    public void SetSpeedLimitPercent(int percent)
+    {
+        var clampedPercent = ClampSpeedLimitPercent(percent);
+
+        Volatile.Write(ref _speedLimitPercent, clampedPercent);
+        SaveSpeedLimitPercent(clampedPercent);
+    }
+
+    private ushort ApplyDriveSpeedLimit(ushort gas, ushort buttons)
+    {
+        if ((buttons & (1 << LogicalDriveButton)) == 0)
+        {
+            return gas;
+        }
+
+        var limit = SpeedLimitPercent;
+
+        if (limit >= SpeedLimitMaximumPercent)
+        {
+            return gas;
+        }
+
+        return (ushort)Math.Clamp(((int)gas * limit + 50) / 100, 0, 1000);
+    }
+
+    private static int ClampSpeedLimitPercent(int percent)
+    {
+        return Math.Clamp(percent, SpeedLimitMinimumPercent, SpeedLimitMaximumPercent);
+    }
+
+    private static int LoadSpeedLimitPercent()
+    {
+        try
+        {
+            var path = SpeedLimitSettingsPath;
+
+            if (File.Exists(path) && int.TryParse(File.ReadAllText(path), out var percent))
+            {
+                return ClampSpeedLimitPercent(percent);
+            }
+        }
+        catch
+        {
+        }
+
+        return SpeedLimitDefaultPercent;
+    }
+
+    private static void SaveSpeedLimitPercent(int percent)
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(SpeedLimitSettingsPath);
+
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            File.WriteAllText(SpeedLimitSettingsPath, ClampSpeedLimitPercent(percent).ToString());
+        }
+        catch
+        {
+        }
+    }
+
+    private static string SpeedLimitSettingsPath =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "PathRacer",
+            "VehicleGroundStation",
+            "speedlimit.txt");
 
     private void ResetControlState()
     {
@@ -551,54 +583,53 @@ public sealed class SenderService : IDisposable
             var l1Rising = l1Pressed && !_localControlState.PrevL1Pressed;
             var r1Rising = r1Pressed && !_localControlState.PrevR1Pressed;
             var l1Falling = !l1Pressed && _localControlState.PrevL1Pressed;
-            var r1Falling = !r1Pressed && _localControlState.PrevR1Pressed;
             var psRising = psPressed && !_localControlState.PrevPsPressed;
-            var comboHeld = l1Pressed && r1Pressed;
 
             if (r1Rising)
             {
-                if (!l1Pressed)
-                {
-                    _localControlState.MainLightOn = !_localControlState.MainLightOn;
-                }
+                _localControlState.CameraPanAngleDeg = 0;
             }
 
-            if (comboHeld)
+            if (l1Rising)
             {
-                _localControlState.ComboLatched = true;
+                _localControlState.L1PressedTicks = nowTicks;
+                _localControlState.L1LongPressHandled = false;
+            }
+
+            if (l1Pressed &&
+                !_localControlState.L1LongPressHandled &&
+                PressElapsed(nowTicks, _localControlState.L1PressedTicks, LightLongPressMs))
+            {
+                _localControlState.FlashSequenceStartTicks = nowTicks;
+                _localControlState.L1LongPressHandled = true;
             }
 
             if (l1Falling)
             {
-                _localControlState.ComboLatched = false;
-            }
+                if (!_localControlState.L1LongPressHandled)
+                {
+                    _localControlState.MainLightOn = !_localControlState.MainLightOn;
+                }
 
-            if (!l1Pressed && !r1Pressed)
-            {
-                _localControlState.ComboLatched = false;
+                _localControlState.L1PressedTicks = 0;
+                _localControlState.L1LongPressHandled = false;
             }
 
             if (psRising)
             {
                 _localControlState.Gear = 'N';
-                _localControlState.ShiftGateActive = false;
                 _localControlState.NeutralUnlocked = false;
             }
-            else if (comboHeld || _localControlState.ShiftGateActive)
+            else if (upShiftRising)
             {
-                if (upShiftRising)
-                {
-                    _localControlState.Gear = 'D';
-                    _localControlState.ShiftGateActive = true;
-                }
-                else if (downShiftRising)
-                {
-                    _localControlState.Gear = 'R';
-                    _localControlState.ShiftGateActive = true;
-                }
+                _localControlState.Gear = 'D';
+            }
+            else if (downShiftRising)
+            {
+                _localControlState.Gear = 'R';
             }
 
-            _localControlState.NeutralUnlocked = comboHeld || _localControlState.ShiftGateActive;
+            _localControlState.NeutralUnlocked = false;
 
             if (l2Rising)
             {
@@ -642,7 +673,15 @@ public sealed class SenderService : IDisposable
                 _localControlState.RearDiffLocked = false;
             }
 
-            _localControlState.FlashActive = l1Pressed && !_localControlState.ComboLatched && !r1Pressed;
+            _localControlState.FlashActive = GetFlashSequenceActive(
+                nowTicks,
+                _localControlState.FlashSequenceStartTicks,
+                out var flashSequenceFinished);
+
+            if (flashSequenceFinished)
+            {
+                _localControlState.FlashSequenceStartTicks = 0;
+            }
 
             _localControlState.PrevDownShiftPressed = downShiftPressed;
             _localControlState.PrevUpShiftPressed = upShiftPressed;
@@ -745,6 +784,50 @@ public sealed class SenderService : IDisposable
 
         var elapsedMs = (nowTicks - lastTicks) * 1000.0 / Stopwatch.Frequency;
         return elapsedMs >= debounceMs;
+    }
+
+    private static bool PressElapsed(long nowTicks, long pressedTicks, int elapsedMsThreshold)
+    {
+        if (pressedTicks <= 0)
+        {
+            return false;
+        }
+
+        var elapsedMs = (nowTicks - pressedTicks) * 1000.0 / Stopwatch.Frequency;
+        return elapsedMs >= elapsedMsThreshold;
+    }
+
+    private static bool GetFlashSequenceActive(long nowTicks, long startTicks, out bool finished)
+    {
+        finished = false;
+
+        if (startTicks <= 0)
+        {
+            return false;
+        }
+
+        var elapsedMs = (nowTicks - startTicks) * 1000.0 / Stopwatch.Frequency;
+        var firstOnEndMs = FlashBlinkOnMs;
+        var firstOffEndMs = firstOnEndMs + FlashBlinkOffMs;
+        var secondOnEndMs = firstOffEndMs + FlashBlinkOnMs;
+
+        if (elapsedMs < firstOnEndMs)
+        {
+            return true;
+        }
+
+        if (elapsedMs < firstOffEndMs)
+        {
+            return false;
+        }
+
+        if (elapsedMs < secondOnEndMs)
+        {
+            return true;
+        }
+
+        finished = true;
+        return false;
     }
 
     private static void WaitUntil(Stopwatch stopwatch, long targetTicks, CancellationToken cancellationToken)
@@ -914,7 +997,7 @@ public sealed class SenderService : IDisposable
 
     private static int DecodeCameraAngle(int angleCode)
     {
-        return angleCode is >= 1 and <= 7
+        return angleCode is >= 1 and <= CameraAngleMaximumCode
             ? CameraAngleMinimumDeg + ((angleCode - 1) * CameraAngleStepDeg)
             : 0;
     }
@@ -1102,7 +1185,9 @@ public sealed class SenderService : IDisposable
         public bool RearDiffLocked { get; set; }
         public bool MainLightOn { get; set; }
         public bool FlashActive { get; set; }
-        public bool ShiftGateActive { get; set; }
+        public long L1PressedTicks { get; set; }
+        public bool L1LongPressHandled { get; set; }
+        public long FlashSequenceStartTicks { get; set; }
         public bool PrevDownShiftPressed { get; set; }
         public bool PrevUpShiftPressed { get; set; }
         public bool PrevRearDiffLockPressed { get; set; }
@@ -1118,7 +1203,6 @@ public sealed class SenderService : IDisposable
         public bool PrevL1Pressed { get; set; }
         public bool PrevR1Pressed { get; set; }
         public bool PrevPsPressed { get; set; }
-        public bool ComboLatched { get; set; }
     }
 
 }

@@ -38,7 +38,6 @@ public partial class Form1 : Form
 
         _senderService.StatusMessage += HandleStatusMessage;
         RefreshComPorts();
-        ProbeWheel();
         AppendStatus("App bereit.");
         UpdateStatus();
 
@@ -121,6 +120,78 @@ public partial class Form1 : Form
         }));
     }
 
+    private void menuSpeedLimit_Click(object? sender, EventArgs e)
+    {
+        using var speedLimitForm = new Form
+        {
+            Text = "Speedlimit",
+            StartPosition = FormStartPosition.CenterParent,
+            ClientSize = new Size(250, 116),
+            BackColor = Color.FromArgb(246, 249, 253),
+            Font = new Font("Segoe UI", 11F, FontStyle.Regular, GraphicsUnit.Point, 0),
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            ShowInTaskbar = false,
+            Icon = Icon
+        };
+
+        var label = new Label
+        {
+            AutoSize = true,
+            Location = new Point(18, 22),
+            Text = "Limit:"
+        };
+
+        var input = new NumericUpDown
+        {
+            Location = new Point(86, 18),
+            Size = new Size(82, 27),
+            Minimum = 0,
+            Maximum = 100,
+            Increment = 5,
+            Value = _senderService.SpeedLimitPercent
+        };
+
+        var percentLabel = new Label
+        {
+            AutoSize = true,
+            Location = new Point(176, 22),
+            Text = "%"
+        };
+
+        var buttonOk = new Button
+        {
+            Text = "OK",
+            Location = new Point(37, 68),
+            Size = new Size(86, 28),
+            DialogResult = DialogResult.OK
+        };
+
+        var buttonCancel = new Button
+        {
+            Text = "Abbrechen",
+            Location = new Point(133, 68),
+            Size = new Size(86, 28),
+            DialogResult = DialogResult.Cancel
+        };
+
+        speedLimitForm.Controls.Add(label);
+        speedLimitForm.Controls.Add(input);
+        speedLimitForm.Controls.Add(percentLabel);
+        speedLimitForm.Controls.Add(buttonOk);
+        speedLimitForm.Controls.Add(buttonCancel);
+        speedLimitForm.AcceptButton = buttonOk;
+        speedLimitForm.CancelButton = buttonCancel;
+
+        if (speedLimitForm.ShowDialog(this) == DialogResult.OK)
+        {
+            var speedLimitPercent = (int)input.Value;
+            _senderService.SetSpeedLimitPercent(speedLimitPercent);
+            UpdateStatus();
+        }
+    }
+
     private void menuControlsHelp_Click(object? sender, EventArgs e)
     {
         using var helpForm = new Form
@@ -155,21 +226,20 @@ public partial class Form1 : Form
             ForeColor = Color.FromArgb(40, 48, 58),
             Font = new Font("Segoe UI", 12F, FontStyle.Regular, GraphicsUnit.Point, 0),
             Text =
-                "L1 + R1 halten und einmal D/R waehlen: Fahrgasse aktiv" + Environment.NewLine +
                 "Up Shift: D" + Environment.NewLine +
                 "Down Shift: R" + Environment.NewLine +
-                "Danach D/R ohne erneute Freigabe umschaltbar" + Environment.NewLine +
                 "PS: Sicherheits-N" + Environment.NewLine +
-                "L2: Fahrmodus Aggressiv/Normal" + Environment.NewLine +
+                "L2: Fahrmodus Sport/Drive" + Environment.NewLine +
                 "R2: Kamera vorne/hinten" + Environment.NewLine +
-                "BTN 7: Kamera +30 Grad" + Environment.NewLine +
-                "BTN 6: Kamera -30 Grad" + Environment.NewLine +
+                "BTN 7: Kamera +45 Grad" + Environment.NewLine +
+                "BTN 6: Kamera -45 Grad" + Environment.NewLine +
+                "R1: Kamera auf 0 Grad" + Environment.NewLine +
                 "BTN 3: Diff vorn sperren" + Environment.NewLine +
                 "BTN 5: Diff vorn entsperren" + Environment.NewLine +
                 "BTN 2: Diff hinten sperren" + Environment.NewLine +
                 "BTN 4: Diff hinten entsperren" + Environment.NewLine +
-                "R1: Licht ein/aus" + Environment.NewLine +
-                "L1: Lichthupe",
+                "L1 kurz: Licht ein/aus" + Environment.NewLine +
+                "L1 lang: Lichthupe 2x",
             Margin = new Padding(0),
             TabStop = false
         };
@@ -197,8 +267,8 @@ public partial class Form1 : Form
         {
             Name = "groupConnections",
             Text = "Verbindungen",
-            Location = new Point(18, 32),
-            Size = new Size(790, 66),
+            Location = new Point(6, 28),
+            Size = new Size(790, 56),
             BackColor = Color.FromArgb(252, 253, 255),
             ForeColor = Color.FromArgb(36, 42, 50),
             Anchor = AnchorStyles.Top | AnchorStyles.Left
@@ -207,7 +277,7 @@ public partial class Form1 : Form
         _labelWheelConnection = new Label
         {
             AutoSize = true,
-            Location = new Point(18, 28),
+            Location = new Point(18, 24),
             Name = "labelWheelConnection",
             Size = new Size(52, 15),
             Text = "Lenkrad:"
@@ -215,7 +285,7 @@ public partial class Form1 : Form
 
         _buttonWheelStart = new Button
         {
-            Location = new Point(84, 24),
+            Location = new Point(84, 19),
             Name = "buttonWheelStart",
             Size = new Size(82, 26),
             Text = "Start",
@@ -225,7 +295,7 @@ public partial class Form1 : Form
 
         _buttonWheelStop = new Button
         {
-            Location = new Point(174, 24),
+            Location = new Point(174, 19),
             Name = "buttonWheelStop",
             Size = new Size(82, 26),
             Text = "Stop",
@@ -234,16 +304,16 @@ public partial class Form1 : Form
         _buttonWheelStop.Click += buttonWheelStop_Click;
 
         labelPort.Text = "ESP32:";
-        labelPort.Location = new Point(304, 28);
-        comboPorts.Location = new Point(358, 25);
+        labelPort.Location = new Point(304, 24);
+        comboPorts.Location = new Point(358, 20);
         comboPorts.Size = new Size(125, 23);
-        buttonRefreshPorts.Location = new Point(492, 24);
+        buttonRefreshPorts.Location = new Point(492, 19);
         buttonRefreshPorts.Size = new Size(74, 26);
         buttonRefreshPorts.Text = "Ports";
-        buttonStart.Location = new Point(578, 24);
+        buttonStart.Location = new Point(578, 19);
         buttonStart.Size = new Size(96, 26);
         buttonStart.Text = "Verbinden";
-        buttonStop.Location = new Point(682, 24);
+        buttonStop.Location = new Point(682, 19);
         buttonStop.Size = new Size(82, 26);
         buttonStop.Text = "Trennen";
 
@@ -651,14 +721,13 @@ public partial class Form1 : Form
 
     private void UpdateStatus()
     {
-        _senderService.RefreshLocalPreview();
         var rawInput = _senderService.LastRawInput;
         labelWheelValue.Text = _senderService.IsWheelRunning
             ? $"{_senderService.WheelName} (aktiv)"
             : _probedWheelName;
         labelSenderValue.Text = _senderService.IsEspConnected ? "Verbunden" : "Getrennt";
         labelPacketsValue.Text = _senderService.PacketCount.ToString();
-        labelStateValue.Text = $"{_senderService.StatusText} | BTN: {rawInput.PressedButtons}";
+        labelStateValue.Text = $"{_senderService.StatusText} | Speedlimit: {_senderService.SpeedLimitPercent} % | BTN: {rawInput.PressedButtons}";
         var telemetry = _senderService.LastTelemetry;
         labelSteeringLiveValue.Text = telemetry.SteeringRaw.ToString();
         labelGasLiveValue.Text = telemetry.GasRaw.ToString();
@@ -676,7 +745,7 @@ public partial class Form1 : Form
     private void UpdateVehicleStatus(SenderService.ControlStateSnapshot control, SenderService.VehicleTelemetrySnapshot telemetry)
     {
         labelVehicleLinkValue.Text = telemetry.LinkActive ? "Aktiv" : "Inaktiv";
-        labelVehicleModeValue.Text = control.SportMode ? "Normal" : "Aggressiv";
+        labelVehicleModeValue.Text = control.SportMode ? "Drive" : "Sport";
         labelVehicleCameraValue.Text =
             $"{(control.CameraRearActive ? "Hinten" : "Vorne")} | {control.CameraPanAngleDeg:+#;-#;0} Grad";
         SetDiffState(labelVehicleDiffFrontValue, control.FrontDiffLocked);
@@ -723,30 +792,6 @@ public partial class Form1 : Form
     {
         label.Text = locked ? "Sperre" : "Frei";
         label.ForeColor = locked ? Color.Firebrick : Color.ForestGreen;
-    }
-
-    private void ProbeWheel()
-    {
-        try
-        {
-            var wheelName = DirectInputWheel.ProbePreferredDeviceName();
-
-            if (string.IsNullOrWhiteSpace(wheelName))
-            {
-                AppendStatus("Kein Lenkrad gefunden.");
-                _probedWheelName = "Nicht gefunden";
-                labelWheelValue.Text = _probedWheelName;
-                return;
-            }
-
-            AppendStatus($"Lenkrad gefunden: {wheelName}");
-            _probedWheelName = wheelName;
-            labelWheelValue.Text = _probedWheelName;
-        }
-        catch (Exception ex)
-        {
-            AppendStatus($"Lenkrad-Pruefung fehlgeschlagen: {ex.Message}");
-        }
     }
 
     private void HandleStatusMessage(string message)

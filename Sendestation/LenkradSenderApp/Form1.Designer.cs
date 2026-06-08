@@ -5,6 +5,7 @@ partial class Form1
     private System.ComponentModel.IContainer components = null;
     private MenuStrip menuMain;
     private ToolStripMenuItem menuSettings;
+    private ToolStripMenuItem menuSpeedLimit;
     private ToolStripMenuItem menuDebug;
     private ToolStripMenuItem menuControlsHelp;
     private Label labelPort;
@@ -74,6 +75,7 @@ partial class Form1
         components = new System.ComponentModel.Container();
         menuMain = new MenuStrip();
         menuSettings = new ToolStripMenuItem();
+        menuSpeedLimit = new ToolStripMenuItem();
         menuDebug = new ToolStripMenuItem();
         menuControlsHelp = new ToolStripMenuItem();
         labelPort = new Label();
@@ -143,16 +145,23 @@ partial class Form1
         // 
         // menuSettings
         // 
-        menuSettings.DropDownItems.AddRange(new ToolStripItem[] { menuDebug });
+        menuSettings.DropDownItems.AddRange(new ToolStripItem[] { menuSpeedLimit, menuDebug });
         menuSettings.Name = "menuSettings";
         menuSettings.Size = new Size(61, 20);
         menuSettings.Text = "Settings";
+        //
+        // menuSpeedLimit
         // 
+        menuSpeedLimit.Name = "menuSpeedLimit";
+        menuSpeedLimit.Size = new Size(133, 22);
+        menuSpeedLimit.Text = "Speedlimit";
+        menuSpeedLimit.Click += menuSpeedLimit_Click;
+        //
         // menuDebug
         // 
         menuDebug.CheckOnClick = true;
         menuDebug.Name = "menuDebug";
-        menuDebug.Size = new Size(108, 22);
+        menuDebug.Size = new Size(133, 22);
         menuDebug.Text = "Debug";
         menuDebug.CheckedChanged += menuDebug_CheckedChanged;
         // 
@@ -685,7 +694,7 @@ partial class Form1
         labelVehicleControlsValue.Name = "labelVehicleControlsValue";
         labelVehicleControlsValue.Size = new Size(860, 58);
         labelVehicleControlsValue.TabIndex = 23;
-        labelVehicleControlsValue.Text = "L1 + R1: Fahrstufe aus N freigeben   |   PS: Sicherheits-N\r\nUp Shift: D   |   Down Shift: R   |   L2: Fahrmodus Aggressiv/Normal\r\nR2: Kamera vorne/hinten   |   R1: Licht ein/aus   |   L1: Lichthupe";
+        labelVehicleControlsValue.Text = "PS: Sicherheits-N   |   Up Shift: D   |   Down Shift: R\r\nL2: Fahrmodus Sport/Drive   |   R2: Kamera vorne/hinten   |   R1: Kamera 0 Grad\r\nL1 kurz: Licht ein/aus   |   L1 lang: Lichthupe 2x";
         // 
         // textStatusLog
         // 

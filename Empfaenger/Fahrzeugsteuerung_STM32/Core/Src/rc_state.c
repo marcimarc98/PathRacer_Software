@@ -11,9 +11,10 @@
 #define RC_CHANNEL_INDEX_CONTROL 3U
 #define RC_CONTROL_WORD_MASK     0x07FFU
 #define RC_CAMERA_CODE_SHIFT     8U
-#define RC_CAMERA_CENTER_CODE    4U
+#define RC_CAMERA_CENTER_CODE    3U
+#define RC_CAMERA_MAX_CODE       5U
 #define RC_CAMERA_MIN_DEG        (-90)
-#define RC_CAMERA_STEP_DEG       30
+#define RC_CAMERA_STEP_DEG       45
 #define RC_BUTTON_FRONT_DIFF     6U
 #define RC_BUTTON_REAR_DIFF      7U
 #define RC_CONTROL_SEGMENT_COUNT 4U
@@ -144,7 +145,7 @@ static uint16_t update_segmented_control_word(uint16_t value)
 
 static int camera_angle_from_code(uint16_t code)
 {
-  if ((code < 1U) || (code > 7U))
+  if ((code < 1U) || (code > RC_CAMERA_MAX_CODE))
   {
     code = RC_CAMERA_CENTER_CODE;
   }
