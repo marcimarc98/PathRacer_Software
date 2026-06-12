@@ -16,6 +16,7 @@
 static uint32_t s_last_telemetry_ms = 0U;
 static uint32_t s_last_battery_ms = 0U;
 
+/* Berechnet die CRSF-CRC8-Pruefsumme mit Polynom 0xD5. */
 static uint8_t crc8(const uint8_t* ptr, uint8_t len)
 {
   uint8_t crc = 0U;
@@ -33,6 +34,9 @@ static uint8_t crc8(const uint8_t* ptr, uint8_t len)
   return crc;
 }
 
+/* Baut einen einfachen Flight-Mode-Rahmen.
+ * Im Projekt wird dieser Textkanal genutzt, um die Akkutemperatur kompakt zu senden.
+ */
 static uint8_t build_flight_mode_frame(uint8_t* out_frame, size_t out_frame_size, const crsf_vehicle_status_t* status)
 {
   char payload[12];
@@ -68,6 +72,7 @@ static uint8_t build_flight_mode_frame(uint8_t* out_frame, size_t out_frame_size
   return (uint8_t)(payload_length + 4U);
 }
 
+/* Baut einen CRSF-Battery-Sensor-Rahmen mit Akkuspannung und Prozentwert. */
 static uint8_t build_battery_frame(uint8_t* out_frame, size_t out_frame_size, const crsf_vehicle_status_t* status)
 {
   if ((out_frame == 0) || (status == 0) || (out_frame_size < 12U))
@@ -91,12 +96,14 @@ static uint8_t build_battery_frame(uint8_t* out_frame, size_t out_frame_size, co
   return 12U;
 }
 
+/* Setzt die Sendezeitpunkte fuer die Telemetrie zurueck. */
 void crsf_telemetry_init(void)
 {
   s_last_telemetry_ms = 0U;
   s_last_battery_ms = 0U;
 }
 
+/* Sendet zyklisch Temperatur- und Akkudaten ueber den CRSF-Rueckkanal. */
 void crsf_telemetry_process(uint32_t now_ms, const crsf_vehicle_status_t* status)
 {
   uint8_t frame[CRSF_MAX_FRAME_SIZE];

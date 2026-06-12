@@ -28,8 +28,14 @@
 #define BATTERY_TEMP_ADC_CHANNEL_INDEX   2U
 
 static sensor_data_status_t s_sensor_status;
+
+/* Rohwertfilter fuer die Akkuspannung. Die Spannung wird gemittelt, die Temperatur direkt gelesen. */
 static uint32_t s_battery_raw_accumulator = 0U;
 static uint32_t s_battery_raw_sample_count = 0U;
+
+/* NTC-Tabelle fuer 20 bis 80 Grad Celsius in 1-Grad-Schritten.
+ * Sie vermeidet teure Logarithmen im Normalbereich und nutzt die Beta-Formel nur als Fallback.
+ */
 static const uint16_t s_battery_temp_ntc_ohm_lookup[] = {
     12501U, 11949U, 11424U, 10925U, 10451U, 10000U, 9571U,  9163U,  8774U,  8404U,
     8051U,  7715U,  7395U,  7090U,  6800U,  6522U,  6258U,  6005U,  5764U,  5534U,
@@ -40,11 +46,13 @@ static const uint16_t s_battery_temp_ntc_ohm_lookup[] = {
     1243U
 };
 
+/* Begrenzt groessere Rechenwerte auf uint16_t. */
 static uint16_t clamp_u16(uint32_t value)
 {
   return (value > 0xFFFFU) ? 0xFFFFU : (uint16_t)value;
 }
 
+/* Begrenzt groessere Rechenwerte auf int16_t. */
 static int16_t clamp_i16(int32_t value)
 {
   if (value < -32768)
@@ -60,6 +68,7 @@ static int16_t clamp_i16(int32_t value)
   return (int16_t)value;
 }
 
+/* Wandelt Packspannung in eine einfache Prozentanzeige fuer 4S Li-Ion um. */
 static uint8_t battery_mv_to_percent(uint16_t battery_mv)
 {
   if (battery_mv <= BATTERY_EMPTY_MV)
@@ -75,6 +84,9 @@ static uint8_t battery_mv_to_percent(uint16_t battery_mv)
   return (uint8_t)(((uint32_t)(battery_mv - BATTERY_EMPTY_MV) * 100U) / (BATTERY_FULL_MV - BATTERY_EMPTY_MV));
 }
 
+/* Liest einen ADC-Kanal direkt ueber Registerzugriff.
+ * Das Projekt nutzt nur wenige Kanaele, daher ist kein DMA noetig.
+ */
 static uint16_t adc_read_channel(uint32_t channel_index)
 {
   uint32_t timeout = ADC_CONVERSION_TIMEOUT_LOOPS;
@@ -95,11 +107,13 @@ static uint16_t adc_read_channel(uint32_t channel_index)
   return (uint16_t)ADC1->DR;
 }
 
+/* Wandelt 12-Bit-ADC-Zaehler in Millivolt am ADC-Pin um. */
 static uint16_t adc_counts_to_mv(uint16_t raw_counts)
 {
   return (uint16_t)(((uint32_t)raw_counts * ADC_REFERENCE_MV) / ADC_FULL_SCALE_COUNTS);
 }
 
+/* Sucht die NTC-Temperatur in der vorberechneten Widerstandstabelle und interpoliert zwischen zwei Punkten. */
 static int battery_temp_lookup_c_from_resistance(float ntc_resistance, float* out_temperature_celsius)
 {
   const size_t last_index = (sizeof(s_battery_temp_ntc_ohm_lookup) / sizeof(s_battery_temp_ntc_ohm_lookup[0])) - 1U;
@@ -134,6 +148,7 @@ static int battery_temp_lookup_c_from_resistance(float ntc_resistance, float* ou
   return 1;
 }
 
+/* Rechnet den gemessenen Spannungsteilerwert auf die echte Akkuspannung hoch. */
 static uint16_t battery_voltage_mv_from_counts(uint16_t raw_counts)
 {
   const uint32_t sensed_mv = adc_counts_to_mv(raw_counts);
@@ -143,6 +158,7 @@ static uint16_t battery_voltage_mv_from_counts(uint16_t raw_counts)
   return clamp_u16(battery_mv);
 }
 
+/* Wandelt den ADC-Wert des NTC-Spannungsteilers in Grad Celsius um. */
 static int16_t battery_temp_c_from_counts(uint16_t raw_counts)
 {
   const float adc_ratio = (float)raw_counts / (float)ADC_FULL_SCALE_COUNTS;
@@ -188,6 +204,7 @@ static int16_t battery_temp_c_from_counts(uint16_t raw_counts)
   return clamp_i16((int32_t)(temperature_celsius >= 0.0f ? (temperature_celsius + 0.5f) : (temperature_celsius - 0.5f)));
 }
 
+/* Initialisiert GPIO und ADC fuer Akkuspannung und Akkutemperatur. */
 void sensor_data_init(void)
 {
   GPIO_InitTypeDef gpio = {0};
@@ -259,6 +276,7 @@ void sensor_data_init(void)
   s_battery_raw_sample_count = 0U;
 }
 
+/* Liest die Sensorwerte und aktualisiert den aktuellen Status fuer den Rueckkanal. */
 void sensor_data_sample(void)
 {
   const uint16_t battery_raw = adc_read_channel(BATTERY_ADC_CHANNEL_INDEX);
@@ -284,6 +302,7 @@ void sensor_data_sample(void)
   s_sensor_status.battery_temp_c = battery_temp_c_from_counts(battery_temp_raw);
 }
 
+/* Gibt die zuletzt gemessenen Sensordaten an den Hauptloop weiter. */
 void sensor_data_get_status(sensor_data_status_t* out_status)
 {
   if (out_status == 0)

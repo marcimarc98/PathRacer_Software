@@ -26,6 +26,7 @@
 static rc_state_t s_rc_state;
 static uint16_t s_segmented_control_word = (uint16_t)(RC_CAMERA_CENTER_CODE << RC_CAMERA_CODE_SHIFT);
 
+/* Sperrt Interrupts kurzzeitig, damit ISR und Hauptloop keinen Zwischenzustand lesen/schreiben. */
 static uint32_t enter_critical_section(void)
 {
   uint32_t primask = __get_PRIMASK();
@@ -34,6 +35,7 @@ static uint32_t enter_critical_section(void)
   return primask;
 }
 
+/* Stellt den vorherigen Interruptzustand wieder her. */
 static void exit_critical_section(uint32_t primask)
 {
   if (primask == 0U)
@@ -42,6 +44,7 @@ static void exit_critical_section(uint32_t primask)
   }
 }
 
+/* Begrenzt Servo-Pulsweiten auf den normalen RC-Bereich. */
 static int clamp_us(int pulse_us)
 {
   if (pulse_us < 1000)
@@ -57,21 +60,27 @@ static int clamp_us(int pulse_us)
   return pulse_us;
 }
 
+/* Wandelt CRSF-Kanalwerte in klassische 1000-2000-us-Pulsweiten um. */
 static int crsf_to_us(uint16_t value)
 {
   return clamp_us((((int)value - (int)CRSF_CHANNEL_VALUE_MID) * 5 / 8) + 1500);
 }
 
+/* Invertiert eine Servo-Pulsweite um die Mittelstellung 1500 us. */
 static int invert_servo_us(int pulse_us)
 {
   return clamp_us(3000 - pulse_us);
 }
 
+/* Maskiert das rekonstruierte Steuerwort auf die genutzten Bits. */
 static uint16_t crsf_to_control_word(uint16_t value)
 {
   return value & RC_CONTROL_WORD_MASK;
 }
 
+/* Erkennt ein segmentiertes Steuerwortsymbol auf CRSF-Kanal 4.
+ * Die Toleranz macht die Auswertung unempfindlicher gegen kleine Quantisierungsabweichungen.
+ */
 static bool decode_control_symbol(uint16_t value, uint8_t* out_segment, uint8_t* out_payload)
 {
   const int raw_symbol =
@@ -101,6 +110,7 @@ static bool decode_control_symbol(uint16_t value, uint8_t* out_segment, uint8_t*
   return *out_segment < RC_CONTROL_SEGMENT_COUNT;
 }
 
+/* Rekonstruiert das 11-Bit-Steuerwort aus nacheinander empfangenen Segmenten. */
 static uint16_t update_segmented_control_word(uint16_t value)
 {
   uint8_t segment = 0U;
@@ -143,6 +153,7 @@ static uint16_t update_segmented_control_word(uint16_t value)
   return s_segmented_control_word;
 }
 
+/* Wandelt den Kamerawinkel-Code aus dem Steuerwort in Grad um. */
 static int camera_angle_from_code(uint16_t code)
 {
   if ((code < 1U) || (code > RC_CAMERA_MAX_CODE))
@@ -153,6 +164,7 @@ static int camera_angle_from_code(uint16_t code)
   return RC_CAMERA_MIN_DEG + (((int)code - 1) * RC_CAMERA_STEP_DEG);
 }
 
+/* Fuellt einen sicheren Grundzustand ohne gueltiges RC-Signal. */
 static void fill_default_state(rc_state_t* state)
 {
   uint32_t i = 0U;
@@ -183,6 +195,7 @@ static void fill_default_state(rc_state_t* state)
   }
 }
 
+/* Initialisiert den globalen RC-Zustand. */
 void rc_state_init(void)
 {
   rc_state_t initial_state;
@@ -196,6 +209,7 @@ void rc_state_init(void)
   exit_critical_section(primask);
 }
 
+/* Uebernimmt einen neuen CRSF-Kanalsatz und aktualisiert den nutzbaren RC-Zustand. */
 void rc_state_update_from_channels(const uint16_t channels[RC_STATE_NUM_CHANNELS], uint32_t now_ms)
 {
   rc_state_t next_state;
@@ -213,6 +227,7 @@ void rc_state_update_from_channels(const uint16_t channels[RC_STATE_NUM_CHANNELS
   next_state.gas_us = crsf_to_us(next_state.channels[RC_CHANNEL_INDEX_GAS]);
   next_state.bremse_us = crsf_to_us(next_state.channels[RC_CHANNEL_INDEX_BREMSE]);
 
+  /* Kanal 4 enthaelt nicht direkt das Steuerwort, sondern ein Segment-Symbol. */
   const uint16_t control_word = update_segmented_control_word(next_state.channels[RC_CHANNEL_INDEX_CONTROL]);
   const uint16_t camera_code = (control_word >> RC_CAMERA_CODE_SHIFT) & 0x07U;
 
@@ -239,6 +254,7 @@ void rc_state_update_from_channels(const uint16_t channels[RC_STATE_NUM_CHANNELS
   exit_critical_section(primask);
 }
 
+/* Markiert den RC-Zustand als ungueltig, ohne die letzten Werte sofort zu zerstoeren. */
 void rc_state_mark_signal_lost(void)
 {
   uint32_t primask = enter_critical_section();
@@ -248,6 +264,7 @@ void rc_state_mark_signal_lost(void)
   exit_critical_section(primask);
 }
 
+/* Liefert eine threadsichere Momentaufnahme fuer den Hauptloop. */
 void rc_state_snapshot(rc_state_t* out_state)
 {
   uint32_t primask = 0U;
@@ -262,6 +279,7 @@ void rc_state_snapshot(rc_state_t* out_state)
   exit_critical_section(primask);
 }
 
+/* Prueft, ob das letzte gueltige RC-Paket innerhalb des Timeout-Fensters liegt. */
 bool rc_state_signal_is_recent(const rc_state_t* state, uint32_t now_ms, uint32_t timeout_ms)
 {
   if ((state == 0) || !state->signal_valid)

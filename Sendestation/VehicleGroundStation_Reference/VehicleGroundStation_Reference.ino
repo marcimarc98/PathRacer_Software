@@ -6,15 +6,26 @@
 #include "esp32-hal-matrix.h"
 #include "esp_err.h"
 
+// ESP32-Funkstation fuer PathRacer.
+// Aufgabe:
+// 1. Hostpakete der Windows-App ueber USB-Serial lesen.
+// 2. Daraus CRSF-RC-Kanalrahmen fuer das ELRS-Modul erzeugen.
+// 3. Zwischen Senden und Hoeren auf einer Single-Wire-Half-Duplex-Leitung umschalten.
+// 4. CRSF-Telemetrie vom Rueckkanal lesen und als vereinfachtes Statuspaket an die App senden.
+
 // --------------------------------------------------
 // USER CONFIG
 // --------------------------------------------------
 static constexpr uart_port_t UART_CRSF = UART_NUM_1;
+
+// CRSF/ELRS laeuft hier ueber eine einzige Leitung. Der Pin wird je nach Phase als TX oder RX genutzt.
 static constexpr int CRSF_DATA_PIN = 17;
 
 static constexpr uint32_t USB_BAUD = 460800;
 static constexpr uint32_t CRSF_BAUD = 420000;
 static constexpr uint32_t SEND_PERIOD_US = 4000;      // 250 Hz
+
+// Statuspakete zur App laufen langsamer als die Steuerdaten, weil sie nur Anzeigeinformationen enthalten.
 static constexpr uint32_t STATUS_PERIOD_MS = 100;
 static constexpr uint32_t STATUS_VALID_MS = 3000;
 static constexpr uint32_t DEBUG_PERIOD_MS = 250;
@@ -45,6 +56,7 @@ static constexpr uint16_t CRSF_CHANNEL_VALUE_MAX = 1792;
 // --------------------------------------------------
 // Host packet definitions
 // --------------------------------------------------
+// Kleines App-zu-ESP32-Paket: 0xAA 0x55, Lenkung, Gas, Bremse, Steuerwort, XOR.
 static constexpr uint8_t HOST_HEADER_1 = 0xAA;
 static constexpr uint8_t HOST_HEADER_2 = 0x55;
 static constexpr size_t HOST_PACKET_SIZE = 11;
@@ -53,11 +65,13 @@ static constexpr uint16_t UNUSED_BUTTON_CHANNEL_VALUE = CRSF_CHANNEL_VALUE_MIN;
 // --------------------------------------------------
 // Status packet to PC
 // --------------------------------------------------
+// Vereinfachter Rueckkanal fuer die Windows-App. Die App muss dadurch kein CRSF parsen.
 static constexpr uint8_t STATUS_HEADER_1 = 0x5A;
 static constexpr uint8_t STATUS_HEADER_2 = 0xA5;
 static constexpr uint8_t STATUS_PACKET_TYPE = 0x31;
 static constexpr size_t STATUS_PACKET_SIZE = 20;
 
+// Bitpositionen im logischen Steuerwort aus der Windows-App.
 static constexpr int LOGICAL_BUTTON_REVERSE = 0;
 static constexpr int LOGICAL_BUTTON_DRIVE = 1;
 static constexpr int LOGICAL_BUTTON_CAMERA_REAR = 2;
@@ -74,6 +88,9 @@ static constexpr uint8_t CAMERA_ANGLE_MAX_CODE = 5;
 static constexpr uint16_t DEFAULT_CONTROL_WORD = (uint16_t)(CAMERA_ANGLE_CENTER_CODE << CAMERA_ANGLE_CODE_SHIFT);
 static constexpr int CAMERA_ANGLE_MIN_DEG = -90;
 static constexpr int CAMERA_ANGLE_STEP_DEG = 45;
+
+// Das Steuerwort wird segmentiert ueber einen CRSF-Kanal uebertragen.
+// Dadurch bleiben die normalen Steuerkanale frei und trotzdem koennen eigene Daten mitlaufen.
 static constexpr uint8_t CONTROL_SEGMENT_COUNT = 4;
 static constexpr uint8_t CONTROL_SEGMENT_PAYLOAD_MASK = 0x07;
 static constexpr uint16_t CONTROL_SYMBOL_MIN_VALUE = 220;
@@ -82,6 +99,7 @@ static constexpr uint16_t CONTROL_SYMBOL_STEP_VALUE = 48;
 // --------------------------------------------------
 // Structs
 // --------------------------------------------------
+// Aktueller Sollzustand aus der Windows-App. Diese Werte werden in CRSF-Kanaele umgesetzt.
 struct Steuerdaten {
     int lenkung_us;
     int gas_us;
@@ -91,6 +109,7 @@ struct Steuerdaten {
     bool button[LOGICAL_BUTTON_COUNT];
 };
 
+// Zuletzt empfangene Fahrzeug- und Linkdaten aus CRSF-Telemetrie.
 struct FahrzeugStatus {
     bool valid;
     char gear;
@@ -119,6 +138,7 @@ struct FahrzeugStatus {
     uint8_t sequence;
 };
 
+// Zaehler fuer Diagnose und Fehlersuche. Sie werden als Debugzeile an die App ausgegeben.
 struct DebugStats {
     uint32_t host_packets_decoded;
     uint32_t telemetry_bytes_seen;
@@ -134,6 +154,7 @@ struct DebugStats {
 // --------------------------------------------------
 // Globals
 // --------------------------------------------------
+// Neutraler Grundzustand, falls noch keine gueltigen Hostdaten empfangen wurden.
 static Steuerdaten s_state = {
     .lenkung_us = 1500,
     .gas_us = 1000,
@@ -149,17 +170,22 @@ static FahrzeugStatus s_vehicle_status = {
 
 static DebugStats s_debug_stats = {};
 
+// Sendepuffer fuer CRSF-Kanaele und den fertig gepackten CRSF-Rahmen.
 static uint16_t s_tx_channels[CRSF_NUM_CHANNELS];
 static uint8_t s_tx_frame[CRSF_TOTAL_FRAME_SIZE];
 
 static uint8_t s_host_packet[HOST_PACKET_SIZE];
 static uint8_t s_host_idx = 0;
 
+// Empfangspuffer fuer CRSF-Telemetrie vom ELRS-Rueckkanal.
 static uint8_t s_rx_frame[CRSF_MAX_FRAME_SIZE];
 static uint8_t s_rx_frame_idx = 0;
 static uint8_t s_rx_expected_total = 0;
 
+// Merkt, ob der Pin gerade mit dem UART-TX-Signal verbunden ist.
 static bool s_crsf_tx_attached = false;
+
+// Naechstes Segment des eigenen Steuerworts, das auf CRSF-Kanal 4 gesendet wird.
 static uint8_t s_control_segment = 0;
 
 // --------------------------------------------------
@@ -200,6 +226,7 @@ static const uint8_t crc8tab[256] = {
     0xAD, 0x78, 0xD2, 0x07, 0x53, 0x86, 0x2C, 0xF9
 };
 
+// Berechnet die CRSF-CRC8-Pruefsumme mit Polynom 0xD5.
 static uint8_t crc8(const uint8_t *ptr, uint8_t len)
 {
     uint8_t crc = 0;
@@ -214,11 +241,13 @@ static uint8_t crc8(const uint8_t *ptr, uint8_t len)
 // --------------------------------------------------
 // Helper
 // --------------------------------------------------
+// Kleine Kapselung fuer Zeitstempel. Erleichtert einheitliche Nutzung im Code.
 static uint32_t millis_now()
 {
     return millis();
 }
 
+// Begrenzt einen Wert auf den gueltigen CRSF-Kanalbereich.
 static uint16_t clampCh(int v)
 {
     if (v < (int)CRSF_CHANNEL_VALUE_MIN) return CRSF_CHANNEL_VALUE_MIN;
@@ -226,6 +255,7 @@ static uint16_t clampCh(int v)
     return (uint16_t)v;
 }
 
+// Begrenzt klassische Servo-Pulsweiten auf 1000 bis 2000 us.
 static int clampUs(int us)
 {
     if (us < 1000) return 1000;
@@ -233,27 +263,32 @@ static int clampUs(int us)
     return us;
 }
 
+// Wandelt Servo-Pulsweite in CRSF-Kanalwert um. 1500 us entspricht CRSF-Mitte 992.
 static uint16_t usToCRSF(int us)
 {
     int v = ((us - 1500) * 8 / 5) + 992;
     return clampCh(v);
 }
 
+// Wandelt den App-Lenkwert (-1000 bis +1000) in eine Servo-Pulsweite.
 static int normSteerToUs(int16_t steer)
 {
     return clampUs(1500 + ((int)steer / 2));
 }
 
+// Wandelt Pedalwerte (0 bis 1000) in eine Servo-Pulsweite.
 static int normPedalToUs(uint16_t pedal)
 {
     return clampUs(1000 + (int)pedal);
 }
 
+// Holt den Kamerawinkel-Code aus dem Steuerwort.
 static uint8_t cameraAngleCodeFromControlWord(uint16_t control_word)
 {
     return (uint8_t)((control_word >> CAMERA_ANGLE_CODE_SHIFT) & 0x07U);
 }
 
+// Wandelt den Kamerawinkel-Code in Grad um.
 static int cameraAngleDegFromCode(uint8_t angle_code)
 {
     if ((angle_code < 1U) || (angle_code > CAMERA_ANGLE_MAX_CODE)) {
@@ -263,6 +298,8 @@ static int cameraAngleDegFromCode(uint8_t angle_code)
     return CAMERA_ANGLE_MIN_DEG + (((int)angle_code - 1) * CAMERA_ANGLE_STEP_DEG);
 }
 
+// Erzeugt ein robustes Symbol fuer ein Segment des Steuerworts.
+// Das Symbol wird als klar unterscheidbarer CRSF-Kanalwert auf Kanal 4 gesendet.
 static uint16_t controlSymbolForSegment(uint16_t control_word, uint8_t segment)
 {
     uint8_t payload = 0;
@@ -290,6 +327,7 @@ static uint16_t controlSymbolForSegment(uint16_t control_word, uint8_t segment)
     return (uint16_t)(CONTROL_SYMBOL_MIN_VALUE + ((uint16_t)symbol * CONTROL_SYMBOL_STEP_VALUE));
 }
 
+// Prueft ein logisches Bit aus dem aktuellen Steuerwort.
 static bool logicalButtonActive(int button_index)
 {
     if ((button_index < 0) || (button_index >= LOGICAL_BUTTON_COUNT)) {
@@ -299,6 +337,7 @@ static bool logicalButtonActive(int button_index)
     return s_state.button[button_index];
 }
 
+// Leitet die Fahrstufe aus den logischen Bits ab. Widerspruchliche Bits ergeben Neutral.
 static char commandedGear()
 {
     const bool reverse_selected = logicalButtonActive(LOGICAL_BUTTON_REVERSE);
@@ -311,37 +350,44 @@ static char commandedGear()
     return reverse_selected ? 'R' : 'D';
 }
 
+// Lokaler Zugriff auf den Fahrmodus.
 static bool commandedSportMode()
 {
     return logicalButtonActive(LOGICAL_BUTTON_SPORT);
 }
 
+// Lokaler Zugriff auf das Hauptlicht.
 static bool commandedMainLight()
 {
     return logicalButtonActive(LOGICAL_BUTTON_MAIN_LIGHT);
 }
 
+// Lokaler Zugriff auf die Kameraumschaltung.
 static bool commandedCameraRear()
 {
     return logicalButtonActive(LOGICAL_BUTTON_CAMERA_REAR);
 }
 
+// Lokaler Zugriff auf die vordere Differentialsperre.
 static bool commandedFrontDiffLocked()
 {
     return logicalButtonActive(LOGICAL_BUTTON_FRONT_DIFF_LOCKED);
 }
 
+// Lokaler Zugriff auf die hintere Differentialsperre.
 static bool commandedRearDiffLocked()
 {
     return logicalButtonActive(LOGICAL_BUTTON_REAR_DIFF_LOCKED);
 }
 
+// Liefert einen gueltigen Kamerawinkel-Code, auch wenn das Steuerwort ungueltige Bits enthalten sollte.
 static uint8_t commandedCameraAngleCode()
 {
     uint8_t angle_code = cameraAngleCodeFromControlWord(s_state.control_word);
     return ((angle_code >= 1U) && (angle_code <= CAMERA_ANGLE_MAX_CODE)) ? angle_code : CAMERA_ANGLE_CENTER_CODE;
 }
 
+// Liefert den aktuellen Kamerawinkel in Grad fuer Debugausgaben.
 static int commandedCameraAngleDeg()
 {
     return cameraAngleDegFromCode(commandedCameraAngleCode());
@@ -350,6 +396,8 @@ static int commandedCameraAngleDeg()
 // --------------------------------------------------
 // CRSF Send / Listen Mode
 // --------------------------------------------------
+// Schaltet die Single-Wire-Leitung in den Empfangsmodus.
+// Wichtig: Der UART-TX-Ausgang wird vom Pin getrennt, damit Telemetrie zurueckkommen kann.
 static void enterCrsfListenMode()
 {
     if (s_crsf_tx_attached) {
@@ -361,6 +409,8 @@ static void enterCrsfListenMode()
     gpio_set_pull_mode((gpio_num_t)CRSF_DATA_PIN, GPIO_PULLUP_ONLY);
 }
 
+// Schaltet die Single-Wire-Leitung in den Sendemodus.
+// Fuer den CRSF-Rahmen wird derselbe GPIO als TX und RX am UART eingetragen.
 static void enterCrsfSendMode()
 {
     gpio_set_direction((gpio_num_t)CRSF_DATA_PIN, GPIO_MODE_INPUT_OUTPUT);
@@ -380,6 +430,8 @@ static void enterCrsfSendMode()
 // --------------------------------------------------
 // Channels
 // --------------------------------------------------
+// Befuellt die 16 CRSF-Kanaele.
+// Kanal 1-3 sind Lenkung, Gas, Bremse; Kanal 4 traegt segmentiert das eigene Steuerwort.
 static void fillChannels(uint16_t ch[CRSF_NUM_CHANNELS])
 {
     for (int i = 0; i < CRSF_NUM_CHANNELS; ++i) {
@@ -400,6 +452,8 @@ static void fillChannels(uint16_t ch[CRSF_NUM_CHANNELS])
 // --------------------------------------------------
 // CRSF Frame Build
 // --------------------------------------------------
+// Baut einen vollstaendigen CRSF-Rahmen vom Typ RC Channels Packed.
+// 16 Kanaele werden als 11-Bit-Werte dicht in 22 Nutzdatenbytes gepackt.
 static void buildCrsfRcChannelsFrame(uint8_t out[CRSF_TOTAL_FRAME_SIZE], const uint16_t chIn[CRSF_NUM_CHANNELS])
 {
     out[0] = CRSF_SYNC_BYTE;
@@ -413,6 +467,7 @@ static void buildCrsfRcChannelsFrame(uint8_t out[CRSF_TOTAL_FRAME_SIZE], const u
     int p = 0;
 
     for (int i = 0; i < CRSF_NUM_CHANNELS; ++i) {
+        // CRSF nutzt 11 Bit pro Kanal. Alles ausserhalb wird vor dem Packen begrenzt.
         const uint16_t v = clampCh(chIn[i]) & 0x07FF;
 
         bitbuf |= ((uint32_t)v) << bitcnt;
@@ -439,6 +494,8 @@ static void buildCrsfRcChannelsFrame(uint8_t out[CRSF_TOTAL_FRAME_SIZE], const u
 // --------------------------------------------------
 // Telemetry Parser
 // --------------------------------------------------
+// Akzeptiert bekannte CRSF-Adressen als Startbyte.
+// Neben 0xC8 koennen Telemetrierahmen auch mit anderen Geraeteadressen beginnen.
 static bool isValidSyncByte(uint8_t value)
 {
     switch (value) {
@@ -454,12 +511,15 @@ static bool isValidSyncByte(uint8_t value)
     }
 }
 
+// Setzt den Byte-fuer-Byte-Telemetrieparser in den Anfangszustand.
 static void resetTelemetryParser()
 {
     s_rx_frame_idx = 0;
     s_rx_expected_total = 0;
 }
 
+// Wertet Flight-Mode-Telemetrie aus.
+// Im Projekt wird dieser Textkanal zusaetzlich fuer einfache Status-/Temperaturdaten genutzt.
 static void parseFlightModePayload(const uint8_t *payload, size_t payload_length)
 {
     char mode_text[32];
@@ -478,6 +538,7 @@ static void parseFlightModePayload(const uint8_t *payload, size_t payload_length
     memcpy(mode_text, payload, copy_len);
     mode_text[copy_len] = '\0';
 
+    // Kurzformat nur fuer Temperatur, z. B. "T35".
     if (sscanf(mode_text, "T%d", &battery_temp_c) == 1) {
         s_vehicle_status.valid = true;
         s_vehicle_status.battery_temp_c = (int16_t)battery_temp_c;
@@ -486,6 +547,7 @@ static void parseFlightModePayload(const uint8_t *payload, size_t payload_length
         return;
     }
 
+    // Vollformat, z. B. "D|SPORT|L1|C0|T35".
     int parsed = sscanf(
         mode_text,
         "%c|%7[^|]|L%u|C%u|T%d",
@@ -526,6 +588,7 @@ static void parseFlightModePayload(const uint8_t *payload, size_t payload_length
     }
 }
 
+// Wertet CRSF Battery-Sensor-Telemetrie aus.
 static void parseBatteryPayload(const uint8_t *payload, size_t payload_length)
 {
     if (payload_length < 8) {
@@ -539,6 +602,7 @@ static void parseBatteryPayload(const uint8_t *payload, size_t payload_length)
     s_vehicle_status.last_link_activity_ms = millis_now();
 }
 
+// Wertet Link-Statistics aus, also Funkqualitaet und Sendeleistungsinformationen.
 static void parseLinkStatisticsPayload(const uint8_t *payload, size_t payload_length)
 {
     if (payload_length < 10) {
@@ -559,6 +623,7 @@ static void parseLinkStatisticsPayload(const uint8_t *payload, size_t payload_le
     s_vehicle_status.last_link_activity_ms = millis_now();
 }
 
+// Prueft einen vollstaendigen CRSF-Telemetrierahmen und verteilt ihn an den passenden Parser.
 static void processTelemetryFrame(const uint8_t *frame)
 {
     const uint8_t length = frame[1];
@@ -603,6 +668,8 @@ static void processTelemetryFrame(const uint8_t *frame)
     }
 }
 
+// Byteweiser CRSF-Telemetrieparser.
+// Er sucht Sync, liest Laenge und sammelt dann bis zum vollstaendigen Rahmen.
 static void processTelemetryByte(uint8_t value)
 {
     if (s_rx_frame_idx == 0) {
@@ -650,6 +717,7 @@ static void processTelemetryByte(uint8_t value)
     }
 }
 
+// Liest alle aktuell verfuegbaren Bytes vom CRSF-UART, ohne den Hauptloop zu blockieren.
 static void readCrsfTelemetry()
 {
     uint8_t buffer[64];
@@ -670,6 +738,7 @@ static void readCrsfTelemetry()
 // --------------------------------------------------
 // Status to Host
 // --------------------------------------------------
+// Codiert die Fahrstufe fuer das kompakte Statuspaket an die Windows-App.
 static uint8_t gearToCode(char gear)
 {
     switch (gear) {
@@ -680,6 +749,8 @@ static uint8_t gearToCode(char gear)
     }
 }
 
+// Sendet ein vereinfachtes 20-Byte-Statuspaket an die Windows-App.
+// Es kombiniert lokale Sollzustaende mit den zuletzt empfangenen CRSF-Telemetriedaten.
 static void sendVehicleStatusToHost()
 {
     static uint32_t last_status_ms = 0;
@@ -699,6 +770,7 @@ static void sendVehicleStatusToHost()
 
     last_status_ms = now_ms;
 
+    // Flags sind bewusst kompakt, damit die App nur ein kleines Paket parsen muss.
     if (link_active) flags |= 0x01;
     if (commandedSportMode()) flags |= 0x02;
     if (commandedMainLight()) flags |= 0x04;
@@ -730,6 +802,7 @@ static void sendVehicleStatusToHost()
 
     packet[16] = s_vehicle_status.rf_profile;
     packet[17] = s_vehicle_status.tx_power;
+    // Untere 4 Bit: Sequenzzaehler, obere Bits: Kamerawinkel-Code.
     packet[18] = (uint8_t)((s_vehicle_status.sequence++ & 0x0FU) | (commandedCameraAngleCode() << 4));
 
     for (size_t i = 0; i < STATUS_PACKET_SIZE - 1; ++i) {
@@ -746,6 +819,8 @@ static void sendVehicleStatusToHost()
 // --------------------------------------------------
 // Debug
 // --------------------------------------------------
+// Sendet eine lesbare Debugzeile an die App.
+// Diese Zeile laeuft ueber denselben USB-Serial-Port wie das binaere Statuspaket.
 static void sendDebugLine()
 {
     static uint32_t last_debug_ms = 0;
@@ -797,11 +872,13 @@ static void sendDebugLine()
 // --------------------------------------------------
 // Host Parser
 // --------------------------------------------------
+// Setzt den Parser fuer Hostpakete aus der Windows-App zurueck.
 static void resetHostParser()
 {
     s_host_idx = 0;
 }
 
+// Prueft ein vollstaendiges Hostpaket und uebernimmt die Werte in den Steuerzustand.
 static bool decodeHostPacket(const uint8_t *packet, Steuerdaten &out_state)
 {
     uint8_t checksum = 0;
@@ -814,6 +891,7 @@ static bool decodeHostPacket(const uint8_t *packet, Steuerdaten &out_state)
         return false;
     }
 
+    // Hostpaket ist little endian aufgebaut, passend zur Windows-App.
     const int16_t steer = (int16_t)(packet[2] | (packet[3] << 8));
     const uint16_t throttle = (uint16_t)(packet[4] | (packet[5] << 8));
     const uint16_t brake = (uint16_t)(packet[6] | (packet[7] << 8));
@@ -833,6 +911,7 @@ static bool decodeHostPacket(const uint8_t *packet, Steuerdaten &out_state)
     return true;
 }
 
+// Liest Hostdaten von USB-Serial und sucht die Headerfolge 0xAA 0x55.
 static void readLaptopData()
 {
     while (Serial.available() > 0) {
@@ -876,6 +955,9 @@ static void readLaptopData()
 // --------------------------------------------------
 // UART init
 // --------------------------------------------------
+// Initialisiert UART1 fuer CRSF mit 420000 Baud.
+// Die Single-Wire-Half-Duplex-Umschaltung wird bewusst manuell gemacht,
+// weil der ESP32 nach jedem Senden sofort wieder auf Telemetrie hoeren soll.
 static void init_uart_singlewire()
 {
     uart_config_t cfg = {};
@@ -902,13 +984,14 @@ static void init_uart_singlewire()
 // --------------------------------------------------
 // Setup
 // --------------------------------------------------
+// Arduino-Setup: USB-Serial, Grundzustaende, Parser und CRSF-UART vorbereiten.
 void setup()
 {
     Serial.begin(USB_BAUD);
     Serial.setRxBufferSize(256);
     Serial.setTxBufferSize(2048);
 
-    for (int i = 0; i < 13; ++i) {
+    for (int i = 0; i < LOGICAL_BUTTON_COUNT; ++i) {
         s_state.button[i] = false;
     }
 
@@ -943,6 +1026,11 @@ void setup()
 // --------------------------------------------------
 // Loop
 // --------------------------------------------------
+// Hauptloop:
+// - Hostdaten von der App lesen
+// - Telemetrie vom CRSF-Rueckkanal lesen
+// - Status und Debug an die App senden
+// - alle 4000 us einen CRSF-RC-Rahmen senden und danach wieder in Listenmodus gehen
 void loop()
 {
     readLaptopData();
@@ -963,9 +1051,12 @@ void loop()
         fillChannels(s_tx_channels);
         buildCrsfRcChannelsFrame(s_tx_frame, s_tx_channels);
 
+        // Nur fuer den kurzen Sendezeitraum wird GPIO17 als UART-TX verbunden.
         enterCrsfSendMode();
         uart_write_bytes(UART_CRSF, (const char *)s_tx_frame, sizeof(s_tx_frame));
         uart_wait_tx_done(UART_CRSF, pdMS_TO_TICKS(2));
+
+        // Danach wird die Leitung freigegeben, damit Telemetrie ueber denselben Draht empfangen wird.
         enterCrsfListenMode();
     }
 }

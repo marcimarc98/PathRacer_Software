@@ -1,15 +1,18 @@
 namespace LenkradSenderApp;
 
+/// <summary>
+/// Startpunkt der WinForms-Anwendung.
+/// Initialisiert die Windows-Forms-Laufzeit und oeffnet die Hauptmaske.
+/// </summary>
 static class Program
 {
     /// <summary>
-    ///  The main entry point for the application.
+    /// Einstiegspunkt der Anwendung. STAThread ist fuer WinForms und COM-basierte
+    /// Eingabebibliotheken wie DirectInput erforderlich.
     /// </summary>
     [STAThread]
     static void Main()
     {
-        // To customize application configuration such as set high DPI settings or default font,
-        // see https://aka.ms/applicationconfiguration.
         ApplicationConfiguration.Initialize();
         Application.Run(new Form1());
     }    

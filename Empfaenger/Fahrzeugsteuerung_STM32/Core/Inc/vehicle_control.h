@@ -19,6 +19,7 @@ typedef enum
   VEHICLE_DRIVE_MODE_SPORT = 1
 } vehicle_drive_mode_t;
 
+/* Fertiger Fahrzeugbefehl fuer PWM-Ausgabe und Status. */
 typedef struct
 {
   int lenkung_us;
@@ -32,9 +33,16 @@ typedef struct
   bool diff_rear_locked;
 } vehicle_command_t;
 
+/* Initialisiert die Fahrzeuglogik in Neutral. */
 void vehicle_control_init(void);
+
+/* Beendet zeitabhaengige Sonderzustaende bei Signalverlust. */
 void vehicle_control_on_signal_lost(void);
+
+/* Berechnet aus RC-Zustand den Fahrzeugbefehl. */
 void vehicle_control_step(const rc_state_t* rc_state, vehicle_command_t* out_command);
+
+/* Gibt den aktuellen internen Fahrzeugstatus aus. */
 void vehicle_control_get_status(vehicle_command_t* out_command);
 
 #endif

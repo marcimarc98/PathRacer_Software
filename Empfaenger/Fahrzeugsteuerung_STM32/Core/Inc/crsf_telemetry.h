@@ -13,7 +13,10 @@ typedef struct
   int16_t battery_temp_c;
 } crsf_vehicle_status_t;
 
+/* Setzt interne Telemetriezeitpunkte zurueck. */
 void crsf_telemetry_init(void);
+
+/* Baut und sendet CRSF-Telemetrie aus den aktuellen Fahrzeugdaten. */
 void crsf_telemetry_process(uint32_t now_ms, const crsf_vehicle_status_t* status);
 
 #endif

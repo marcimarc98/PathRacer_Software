@@ -3,6 +3,10 @@ using System.Drawing.Drawing2D;
 
 namespace LenkradSenderApp;
 
+/// <summary>
+/// Hauptfenster der Steuerzentrale.
+/// Die Maske verbindet Benutzerbedienung, Live-Anzeige und den SenderService.
+/// </summary>
 public partial class Form1 : Form
 {
     private readonly SenderService _senderService = new();
@@ -23,6 +27,9 @@ public partial class Form1 : Form
     private Button _buttonWheelStop = null!;
     private string _probedWheelName = "Nicht verbunden";
 
+    /// <summary>
+    /// Erstellt die UI, verbindet Events und startet den regelmaessigen Status-Refresh.
+    /// </summary>
     public Form1()
     {
         InitializeComponent();
@@ -46,6 +53,9 @@ public partial class Form1 : Form
         _statusTimer.Start();
     }
 
+    /// <summary>
+    /// Zeichnet die optischen Hintergrundbereiche der Cockpitoberflaeche.
+    /// </summary>
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
@@ -79,6 +89,9 @@ public partial class Form1 : Form
             Color.FromArgb(0, 0, 0, 0));
     }
 
+    /// <summary>
+    /// Laedt das Fenster-Icon aus dem Assets-Ordner oder nutzt das Programmsymbol als Fallback.
+    /// </summary>
     private void ApplyWindowIcon()
     {
         try
@@ -100,6 +113,9 @@ public partial class Form1 : Form
         }
     }
 
+    /// <summary>
+    /// Stoppt Timer und Hardwarezugriffe, bevor das Fenster geschlossen wird.
+    /// </summary>
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         _statusTimer.Stop();
@@ -108,6 +124,9 @@ public partial class Form1 : Form
         base.OnFormClosing(e);
     }
 
+    /// <summary>
+    /// Schaltet die Debuganzeige ein oder aus.
+    /// </summary>
     private void menuDebug_CheckedChanged(object? sender, EventArgs e)
     {
         ApplyDebugVisibility();
@@ -120,6 +139,9 @@ public partial class Form1 : Form
         }));
     }
 
+    /// <summary>
+    /// Oeffnet einen kleinen Dialog fuer das lokale Gaslimit.
+    /// </summary>
     private void menuSpeedLimit_Click(object? sender, EventArgs e)
     {
         using var speedLimitForm = new Form
@@ -192,6 +214,9 @@ public partial class Form1 : Form
         }
     }
 
+    /// <summary>
+    /// Zeigt die aktuelle Tastenbelegung des Lenkrads an.
+    /// </summary>
     private void menuControlsHelp_Click(object? sender, EventArgs e)
     {
         using var helpForm = new Form
@@ -256,11 +281,17 @@ public partial class Form1 : Form
         helpForm.ShowDialog(this);
     }
 
+    /// <summary>
+    /// Aktualisiert die Liste der verfuegbaren COM-Ports.
+    /// </summary>
     private void buttonRefreshPorts_Click(object sender, EventArgs e)
     {
         RefreshComPorts();
     }
 
+    /// <summary>
+    /// Baut den Verbindungsbereich fuer Lenkrad und ESP32 aus den Designer-Controls zusammen.
+    /// </summary>
     private void InitializeConnectionHeader()
     {
         _groupConnections = new ThemedGroupBox
@@ -340,6 +371,9 @@ public partial class Form1 : Form
         _groupConnections.BringToFront();
     }
 
+    /// <summary>
+    /// Eventhandler fuer das Verbinden des Lenkrads.
+    /// </summary>
     private void buttonWheelStart_Click(object? sender, EventArgs e)
     {
         try
@@ -356,6 +390,9 @@ public partial class Form1 : Form
         UpdateStatus();
     }
 
+    /// <summary>
+    /// Eventhandler fuer das Trennen des Lenkrads.
+    /// </summary>
     private void buttonWheelStop_Click(object? sender, EventArgs e)
     {
         _senderService.StopWheel();
@@ -363,6 +400,9 @@ public partial class Form1 : Form
         UpdateStatus();
     }
 
+    /// <summary>
+    /// Laedt die Cockpit-Icons aus dem Assets-Ordner und erzeugt Fallback-Icons bei fehlenden Dateien.
+    /// </summary>
     private void InitializeCockpitIcons()
     {
         labelVehicleLinkIcon.Image = LoadCockpitIcon("link-ui.png", () => CreateLinkIcon(Color.DeepSkyBlue));
@@ -384,6 +424,9 @@ public partial class Form1 : Form
         labelVehicleTempIcon.Text = string.Empty;
     }
 
+    /// <summary>
+    /// Erzeugt den Bereich fuer Link Quality, RSSI, SNR, RF-Profil und Sendeleistung.
+    /// </summary>
     private void InitializeLinkQualityPanel()
     {
         _groupLinkQuality = new GroupBox
@@ -407,6 +450,9 @@ public partial class Form1 : Form
         _groupLinkQuality.BringToFront();
     }
 
+    /// <summary>
+    /// Fuegt eine zweispaltige Zeile in die Funkqualitaetsanzeige ein.
+    /// </summary>
     private static void AddQualityRow(Control parent, int top, string leftCaption, out Label leftValue, string rightCaption, out Label rightValue)
     {
         var leftCaptionLabel = new Label
@@ -455,11 +501,24 @@ public partial class Form1 : Form
         parent.Controls.Add(rightValue);
     }
 
+    /// <summary>
+    /// Formatiert RSSI-Werte. CRSF liefert den Betrag, angezeigt wird der typische negative dBm-Wert.
+    /// </summary>
     private static string FormatRssi(byte value) => value > 0 ? $"-{value} dBm" : "--";
+
+    /// <summary>
+    /// Formatiert SNR-Werte mit Vorzeichen.
+    /// </summary>
     private static string FormatSnr(sbyte value) => value == 0 ? "0 dB" : $"{value:+#;-#;0} dB";
 
+    /// <summary>
+    /// Gibt das CRSF-RF-Profil als kurzen UI-Text aus.
+    /// </summary>
     private static string FormatRfProfile(byte value) => $"Profil {value}";
 
+    /// <summary>
+    /// Uebersetzt die CRSF-Sendeleistungs-Codes in lesbare mW-Werte.
+    /// </summary>
     private static string FormatTxPower(byte value) => value switch
     {
         0 => "0 mW",
@@ -474,6 +533,9 @@ public partial class Form1 : Form
         _ => $"Code {value}"
     };
 
+    /// <summary>
+    /// Laedt ein Icon aus Assets und gibt bei Fehlern ein gezeichnetes Fallback-Icon zurueck.
+    /// </summary>
     private static Image LoadCockpitIcon(string fileName, Func<Bitmap> fallbackFactory)
     {
         try
@@ -493,11 +555,17 @@ public partial class Form1 : Form
         return fallbackFactory();
     }
 
+    /// <summary>
+    /// Erstellt eine transparente Zeichenflaeche fuer Fallback-Icons.
+    /// </summary>
     private static Bitmap CreateCanvas(int width = 40, int height = 40)
     {
         return new Bitmap(width, height);
     }
 
+    /// <summary>
+    /// Aktiviert hochwertige Darstellung fuer kleine Vektor-Fallback-Icons.
+    /// </summary>
     private static void PrepareGraphics(Graphics graphics)
     {
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
@@ -506,6 +574,9 @@ public partial class Form1 : Form
         graphics.Clear(Color.Transparent);
     }
 
+    /// <summary>
+    /// Erstellt ein einfaches Funk-/Link-Icon als Fallback.
+    /// </summary>
     private static Bitmap CreateLinkIcon(Color color)
     {
         var bitmap = CreateCanvas();
@@ -526,6 +597,9 @@ public partial class Form1 : Form
         return bitmap;
     }
 
+    /// <summary>
+    /// Erstellt ein Tacho-Icon fuer den Fahrmodus.
+    /// </summary>
     private static Bitmap CreateDriveModeIcon(Color color)
     {
         var bitmap = CreateCanvas();
@@ -555,6 +629,9 @@ public partial class Form1 : Form
         return bitmap;
     }
 
+    /// <summary>
+    /// Erstellt ein Kamera-Icon fuer die Kameraanzeige.
+    /// </summary>
     private static Bitmap CreateCameraIcon(Color color)
     {
         var bitmap = CreateCanvas();
@@ -576,6 +653,9 @@ public partial class Form1 : Form
         return bitmap;
     }
 
+    /// <summary>
+    /// Erstellt ein Licht-Icon fuer Hauptlicht und Lichthupe.
+    /// </summary>
     private static Bitmap CreateLowBeamIcon(Color color)
     {
         var bitmap = CreateCanvas();
@@ -597,6 +677,9 @@ public partial class Form1 : Form
         return bitmap;
     }
 
+    /// <summary>
+    /// Erstellt ein Batterie-Icon fuer den Akkustatus.
+    /// </summary>
     private static Bitmap CreateBatteryIcon(Color color)
     {
         var bitmap = CreateCanvas();
@@ -618,6 +701,9 @@ public partial class Form1 : Form
         return bitmap;
     }
 
+    /// <summary>
+    /// Erstellt ein Temperatur-Icon fuer den Akkutemperaturwert.
+    /// </summary>
     private static Bitmap CreateTempIcon(Color color)
     {
         var bitmap = CreateCanvas();
@@ -635,6 +721,9 @@ public partial class Form1 : Form
         return bitmap;
     }
 
+    /// <summary>
+    /// Erzeugt einen Pfad fuer abgerundete Rechtecke in eigenen UI-Elementen.
+    /// </summary>
     private static GraphicsPath CreateRoundedRectanglePath(RectangleF rect, float radius)
     {
         var diameter = radius * 2f;
@@ -649,6 +738,9 @@ public partial class Form1 : Form
         return path;
     }
 
+    /// <summary>
+    /// Zeichnet einen UI-Bereich als ruhige Flaeche mit Rahmen.
+    /// </summary>
     private static void DrawSectionCard(Graphics graphics, Rectangle bounds, Color fillColor, Color borderColor, Color shadowColor)
     {
         using (var fillPath = CreateRoundedRectanglePath(bounds, 16f))
@@ -660,6 +752,9 @@ public partial class Form1 : Form
         }
     }
 
+    /// <summary>
+    /// Blendet Debugfelder je nach Menueinstellung ein oder aus.
+    /// </summary>
     private void ApplyDebugVisibility()
     {
         var showDebug = menuDebug.Checked;
@@ -667,6 +762,9 @@ public partial class Form1 : Form
         labelVehicleDebugValue.Visible = showDebug;
     }
 
+    /// <summary>
+    /// Eventhandler fuer das Verbinden des ESP32-COM-Ports.
+    /// </summary>
     private void buttonStart_Click(object sender, EventArgs e)
     {
         if (comboPorts.SelectedItem is not string portName || string.IsNullOrWhiteSpace(portName))
@@ -690,6 +788,9 @@ public partial class Form1 : Form
         UpdateStatus();
     }
 
+    /// <summary>
+    /// Eventhandler fuer das Trennen des ESP32-COM-Ports.
+    /// </summary>
     private void buttonStop_Click(object sender, EventArgs e)
     {
         _senderService.DisconnectEsp();
@@ -697,6 +798,9 @@ public partial class Form1 : Form
         UpdateStatus();
     }
 
+    /// <summary>
+    /// Liest die aktuell verfuegbaren seriellen Ports ein und erhaelt die Auswahl, wenn moeglich.
+    /// </summary>
     private void RefreshComPorts()
     {
         var previous = comboPorts.SelectedItem as string;
@@ -719,6 +823,9 @@ public partial class Form1 : Form
         AppendStatus($"COM-Ports aktualisiert: {string.Join(", ", ports)}");
     }
 
+    /// <summary>
+    /// Aktualisiert alle Livefelder der UI aus den Snapshots des SenderService.
+    /// </summary>
     private void UpdateStatus()
     {
         var rawInput = _senderService.LastRawInput;
@@ -742,6 +849,9 @@ public partial class Form1 : Form
         _buttonWheelStop.Enabled = _senderService.IsWheelRunning;
     }
 
+    /// <summary>
+    /// Uebertraegt lokalen Bedienzustand und Rueckkanal-Telemetrie in die Fahrzeuganzeige.
+    /// </summary>
     private void UpdateVehicleStatus(SenderService.ControlStateSnapshot control, SenderService.VehicleTelemetrySnapshot telemetry)
     {
         labelVehicleLinkValue.Text = telemetry.LinkActive ? "Aktiv" : "Inaktiv";
@@ -788,12 +898,18 @@ public partial class Form1 : Form
             $"Valid: {(debug.Valid ? 1 : 0)}";
     }
 
+    /// <summary>
+    /// Formatiert die Anzeige einer Differentialsperre.
+    /// </summary>
     private static void SetDiffState(Label label, bool locked)
     {
         label.Text = locked ? "Sperre" : "Frei";
         label.ForeColor = locked ? Color.Firebrick : Color.ForestGreen;
     }
 
+    /// <summary>
+    /// Nimmt Statusmeldungen aus Hintergrundthreads entgegen und schreibt sie threadsicher in die UI.
+    /// </summary>
     private void HandleStatusMessage(string message)
     {
         if (IsDisposed)
@@ -816,6 +932,9 @@ public partial class Form1 : Form
         AppendStatus(message);
     }
 
+    /// <summary>
+    /// Fuegt eine Statuszeile mit Uhrzeit im Logfenster an.
+    /// </summary>
     private void AppendStatus(string message)
     {
         var line = $"[{DateTime.Now:HH:mm:ss}] {message}";
@@ -830,8 +949,14 @@ public partial class Form1 : Form
         textStatusLog.ScrollToCaret();
     }
 
+    /// <summary>
+    /// Eigene GroupBox mit ruhigerem Rahmen, passend zur Cockpitoberflaeche.
+    /// </summary>
     private sealed class ThemedGroupBox : GroupBox
     {
+        /// <summary>
+        /// Zeichnet Rahmen, Hintergrund und Titel der angepassten GroupBox.
+        /// </summary>
         protected override void OnPaint(PaintEventArgs e)
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;

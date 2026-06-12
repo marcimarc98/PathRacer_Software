@@ -45,11 +45,13 @@ typedef enum
 
 static transmission_state_t s_transmission_state = TRANSMISSION_STATE_NEUTRAL_LOCKED;
 
+/* Liefert den nutzbaren Pedalbereich in us. */
 static uint16_t get_pedal_full_scale(void)
 {
   return (uint16_t)(PEDAL_MAX_US - PEDAL_MIN_US);
 }
 
+/* Begrenzt PWM-/RC-Pulsweiten auf 1000 bis 2000 us. */
 static int clamp_us(int value)
 {
   if (value < PEDAL_MIN_US)
@@ -65,6 +67,7 @@ static int clamp_us(int value)
   return value;
 }
 
+/* Wandelt ein Pedalsignal in einen Betrag um und unterdrueckt kleine Werte im Deadband. */
 static uint16_t pedal_to_amount_with_deadband(int pedal_us, int deadband_us)
 {
   int amount = clamp_us(pedal_us) - PEDAL_MIN_US;
@@ -77,6 +80,7 @@ static uint16_t pedal_to_amount_with_deadband(int pedal_us, int deadband_us)
   return (uint16_t)amount;
 }
 
+/* Wandelt ein Pedalsignal ohne Deadband in einen Betrag ab 0 um. */
 static uint16_t pedal_to_amount_raw(int pedal_us)
 {
   int amount = clamp_us(pedal_us) - PEDAL_MIN_US;
@@ -89,6 +93,7 @@ static uint16_t pedal_to_amount_raw(int pedal_us)
   return (uint16_t)amount;
 }
 
+/* Prueft ein logisches Bit aus dem RC-Zustand. */
 static bool rc_button_is_pressed(const rc_state_t* rc_state, uint32_t index)
 {
   if ((rc_state == 0) || (index >= RC_STATE_NUM_BUTTONS))
@@ -99,11 +104,13 @@ static bool rc_button_is_pressed(const rc_state_t* rc_state, uint32_t index)
   return rc_state->knopf[index];
 }
 
+/* Spiegelt ein Servo-Signal um 1500 us, z. B. fuer Lenkung bei Rueckkamera. */
 static int mirror_around_neutral(int value_us)
 {
   return clamp_us((CONTROL_NEUTRAL_US * 2) - value_us);
 }
 
+/* Begrenzung der Rueckwaertsgeschwindigkeit. */
 static uint16_t limit_reverse_amount(uint16_t gas_amount)
 {
   const uint16_t reverse_limit =
@@ -112,6 +119,9 @@ static uint16_t limit_reverse_amount(uint16_t gas_amount)
   return (gas_amount > reverse_limit) ? reverse_limit : gas_amount;
 }
 
+/* Macht den normalen Fahrmodus weicher.
+ * Kleine Gassignale werden feiner dosierbar, Vollgas bleibt trotzdem erreichbar.
+ */
 static uint16_t apply_normal_drive_curve(uint16_t gas_amount)
 {
   const uint32_t full_scale = (uint32_t)get_pedal_full_scale();
@@ -144,6 +154,7 @@ static uint16_t apply_normal_drive_curve(uint16_t gas_amount)
   return (uint16_t)shifted_amount;
 }
 
+/* Exponentialkurve fuer die Lenkung im normalen Modus. */
 static int apply_steering_expo(int steering_us)
 {
   const int clamped_steering_us = clamp_us(steering_us);
@@ -168,6 +179,7 @@ static int apply_steering_expo(int steering_us)
   return clamp_us(steering_output);
 }
 
+/* Waehlt je nach Fahrmodus die Lenkkennlinie und spiegelt bei aktiver Rueckkamera. */
 static int apply_steering_curve(int steering_us)
 {
   int steering_output =
@@ -181,6 +193,7 @@ static int apply_steering_curve(int steering_us)
   return steering_output;
 }
 
+/* Setzt die Bremslogik zurueck, z. B. nach Gangwechsel oder Failsafe. */
 static void reset_brake_interlocks(void)
 {
   s_vehicle_control.drive_brake_cycle_active = false;
@@ -188,6 +201,7 @@ static void reset_brake_interlocks(void)
   s_vehicle_control.brake_input_active = false;
 }
 
+/* Erzwingt Neutral und verhindert ungewolltes Anfahren nach Signalverlust oder Reset. */
 static void enter_locked_neutral(void)
 {
   s_transmission_state = TRANSMISSION_STATE_NEUTRAL_LOCKED;
@@ -196,6 +210,9 @@ static void enter_locked_neutral(void)
   reset_brake_interlocks();
 }
 
+/* Mischt Gas und Bremse fuer Vorwaertsfahrt.
+ * Die Bremslogik verhindert, dass kleine Pedalstoerungen sofort Rueckwaerts-/Bremsbefehle ausloesen.
+ */
 static int mix_drive_esc_output(int gas_us, int brake_us)
 {
   uint16_t gas_amount = pedal_to_amount_with_deadband(gas_us, GAS_ACTIVE_DEADBAND_US);
@@ -251,6 +268,7 @@ static int mix_drive_esc_output(int gas_us, int brake_us)
   return CONTROL_NEUTRAL_US;
 }
 
+/* Mischt Gas fuer Rueckwaertsfahrt, mit reduzierter Maximalleistung. */
 static int mix_reverse_esc_output(int gas_us, int brake_us)
 {
   uint16_t limited_gas_amount = limit_reverse_amount(pedal_to_amount_with_deadband(gas_us, GAS_ACTIVE_DEADBAND_US));
@@ -265,18 +283,21 @@ static int mix_reverse_esc_output(int gas_us, int brake_us)
   return CONTROL_NEUTRAL_US;
 }
 
+/* Startet einen kurzen Rueckwaertsimpuls, damit der Fahrregler sicher in den Rueckwaertsmodus kommt. */
 static void start_reverse_prime(void)
 {
   s_vehicle_control.reverse_prime_active = true;
   s_vehicle_control.reverse_prime_started_ms = HAL_GetTick();
 }
 
+/* Beendet den Rueckwaerts-Anlaufimpuls. */
 static void stop_reverse_prime(void)
 {
   s_vehicle_control.reverse_prime_active = false;
   s_vehicle_control.reverse_prime_started_ms = 0U;
 }
 
+/* Fuehrt vor der normalen Rueckwaertsfahrt den Anlaufimpuls mit anschliessender Neutralpause aus. */
 static int mix_reverse_esc_output_with_prime(int gas_us, int brake_us)
 {
   if (s_vehicle_control.reverse_prime_active)
@@ -303,6 +324,7 @@ static int mix_reverse_esc_output_with_prime(int gas_us, int brake_us)
   return mix_reverse_esc_output(gas_us, brake_us);
 }
 
+/* Waehlt die passende ESC-Ausgabe fuer Neutral, Drive oder Reverse. */
 static int mix_esc_output(vehicle_gear_t gear, int gas_us, int brake_us)
 {
   if (gear == VEHICLE_GEAR_DRIVE)
@@ -320,6 +342,7 @@ static int mix_esc_output(vehicle_gear_t gear, int gas_us, int brake_us)
   return CONTROL_NEUTRAL_US;
 }
 
+/* Aktualisiert die interne Fahrstufen-Zustandsmaschine. */
 static void update_transmission_state(
     vehicle_gear_t desired_gear,
     bool neutral_unlocked)
@@ -369,6 +392,7 @@ static void update_transmission_state(
   }
 }
 
+/* Liest die gewuenschte Fahrstufe aus dem RC-Zustand. */
 static vehicle_gear_t get_desired_gear(const rc_state_t* rc_state)
 {
   const bool reverse_selected = rc_button_is_pressed(rc_state, BUTTON_DESIRED_REVERSE);
@@ -382,16 +406,19 @@ static vehicle_gear_t get_desired_gear(const rc_state_t* rc_state)
   return reverse_selected ? VEHICLE_GEAR_REVERSE : VEHICLE_GEAR_DRIVE;
 }
 
+/* Liest den gewuenschten Fahrmodus aus dem RC-Zustand. */
 static vehicle_drive_mode_t get_desired_drive_mode(const rc_state_t* rc_state)
 {
   return rc_button_is_pressed(rc_state, BUTTON_NORMAL_MODE) ? VEHICLE_DRIVE_MODE_NORMAL : VEHICLE_DRIVE_MODE_SPORT;
 }
 
+/* Liest die gewuenschte Kameraauswahl aus dem RC-Zustand. */
 static bool get_desired_camera_rear_active(const rc_state_t* rc_state)
 {
   return rc_button_is_pressed(rc_state, BUTTON_CAMERA_REAR);
 }
 
+/* Initialisiert die Fahrzeuglogik in einem sicheren neutralen Zustand. */
 void vehicle_control_init(void)
 {
   enter_locked_neutral();
@@ -401,11 +428,13 @@ void vehicle_control_init(void)
   reset_brake_interlocks();
 }
 
+/* Reaktion bei Signalverlust: Zeitfunktionen werden gestoppt, Ausgaenge setzt drive_pwm failsafe. */
 void vehicle_control_on_signal_lost(void)
 {
   stop_reverse_prime();
 }
 
+/* Liefert einen sicheren Status, wenn keine neue RC-Auswertung stattfindet. */
 void vehicle_control_get_status(vehicle_command_t* out_command)
 {
   if (out_command == 0)
@@ -424,6 +453,7 @@ void vehicle_control_get_status(vehicle_command_t* out_command)
   out_command->diff_rear_locked = false;
 }
 
+/* Rechnet den aktuellen RC-Zustand in konkrete Fahrzeugbefehle fuer PWM-Ausgaenge um. */
 void vehicle_control_step(const rc_state_t* rc_state, vehicle_command_t* out_command)
 {
   const vehicle_gear_t desired_gear = get_desired_gear(rc_state);

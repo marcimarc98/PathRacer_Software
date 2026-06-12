@@ -13,11 +13,13 @@
 
 static battery_status_t s_battery_status;
 
+/* Begrenzt berechnete Spannungswerte auf uint16_t. */
 static uint16_t clamp_u16(uint32_t value)
 {
   return (value > 0xFFFFU) ? 0xFFFFU : (uint16_t)value;
 }
 
+/* Einfache SoC-Anzeige fuer 4S Li-Ion zwischen leer und voll. */
 static uint8_t battery_mv_to_percent(uint16_t battery_mv)
 {
   if (battery_mv <= BATTERY_EMPTY_MV)
@@ -33,6 +35,9 @@ static uint8_t battery_mv_to_percent(uint16_t battery_mv)
   return (uint8_t)(((uint32_t)(battery_mv - BATTERY_EMPTY_MV) * 100U) / (BATTERY_FULL_MV - BATTERY_EMPTY_MV));
 }
 
+/* Initialisiert den ADC nur fuer die Akkuspannung.
+ * Diese Datei ist eine aeltere, einfachere Variante neben sensor_data.c.
+ */
 void battery_monitor_init(void)
 {
   GPIO_InitTypeDef gpio = {0};
@@ -100,6 +105,7 @@ void battery_monitor_init(void)
   s_battery_status.battery_percent = 0U;
 }
 
+/* Liest den Akkuspannungskanal und rechnet den Spannungsteiler auf Packspannung hoch. */
 void battery_monitor_sample(void)
 {
   uint32_t timeout = ADC_CONVERSION_TIMEOUT_LOOPS;
@@ -127,6 +133,7 @@ void battery_monitor_sample(void)
   s_battery_status.battery_percent = battery_mv_to_percent(s_battery_status.battery_mv);
 }
 
+/* Gibt den zuletzt berechneten Akkustatus aus. */
 void battery_monitor_get_status(battery_status_t* out_status)
 {
   if (out_status == 0)

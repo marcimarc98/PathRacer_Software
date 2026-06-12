@@ -5,16 +5,30 @@ using SharpDX.DirectInput;
 
 namespace LenkradSenderApp;
 
+/// <summary>
+/// Zentrale Logik der Steuerzentrale.
+/// Liest das Lenkrad ein, bildet daraus stabile Fahrzeugzustaende,
+/// sendet Hostpakete an den ESP32 und wertet den Rueckkanal aus.
+/// </summary>
 public sealed class SenderService : IDisposable
 {
+    // Serielle Verbindung zur ESP32-Funkstation.
     private const int BaudRate = 460800;
+
+    // App-intern wird mit 1000 Hz gearbeitet. Der ESP32 erzeugt daraus spaeter CRSF mit 250 Hz.
     private const int SendHz = 1000;
     private const int ReadTimeoutMs = 100;
+
+    // DirectInput wird im DirectInputWheel bereits auf diesen Bereich normalisiert.
     private const int AxisMinimum = -1000;
     private const int AxisMaximum = 1000;
+
+    // Feste Achsbelegung fuer das verwendete Thrustmaster T80 488.
     private const WheelAxis SteeringAxis = WheelAxis.X;
     private const WheelAxis GasAxis = WheelAxis.RotationZ;
     private const WheelAxis BrakeAxis = WheelAxis.Y;
+
+    // Physische Tastenindizes aus DirectInput.
     private const int PhysicalDownShiftButton = 0;
     private const int PhysicalUpShiftButton = 1;
     private const int PhysicalRearDiffLockButton = 2;
@@ -28,6 +42,8 @@ public sealed class SenderService : IDisposable
     private const int PhysicalL1Button = 10;
     private const int PhysicalR1Button = 11;
     private const int PhysicalPsButton = 12;
+
+    // Logische Bits im Steuerwort. Dieses Steuerwort wird spaeter ueber CRSF-Kanal 4 segmentiert.
     private const int LogicalReverseButton = 0;
     private const int LogicalDriveButton = 1;
     private const int LogicalCameraRearButton = 2;
@@ -36,6 +52,8 @@ public sealed class SenderService : IDisposable
     private const int LogicalMainLightButton = 5;
     private const int LogicalFrontDiffLockedButton = 6;
     private const int LogicalRearDiffLockedButton = 7;
+
+    // Kamerawinkel wird nicht als eigenes Feld gesendet, sondern in die oberen Bits des Steuerworts gelegt.
     private const int CameraAngleCodeShift = 8;
     private const int CameraAngleCenterCode = 3;
     private const int CameraAngleMaximumCode = 5;
@@ -49,7 +67,11 @@ public sealed class SenderService : IDisposable
     private const int SpeedLimitDefaultPercent = 100;
     private const int SpeedLimitMinimumPercent = 0;
     private const int SpeedLimitMaximumPercent = 100;
+
+    // Neutraler Zustand: kein Fahrgang aktiv, Kamera in Mittelstellung.
     private const ushort NeutralControlWord = (ushort)(CameraAngleCenterCode << CameraAngleCodeShift);
+
+    // Rueckkanalpaket vom ESP32 zur App. Der ESP32 uebersetzt CRSF-Telemetrie in dieses einfache Format.
     private const byte StatusHeader1 = 0x5A;
     private const byte StatusHeader2 = 0xA5;
     private const byte StatusPacketType = 0x31;
@@ -80,6 +102,9 @@ public sealed class SenderService : IDisposable
     private OutboundSnapshot _lastOutbound = OutboundSnapshot.Neutral;
     private int _speedLimitPercent = LoadSpeedLimitPercent();
 
+    /// <summary>
+    /// Wird ausgeloest, wenn ein neuer Status- oder Fehlertext in der UI erscheinen soll.
+    /// </summary>
     public event Action<string>? StatusMessage;
 
     public bool IsRunning => IsWheelRunning || IsEspConnected;
@@ -144,6 +169,9 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Verbindet das Lenkrad und startet den Hintergrundthread zum zyklischen Einlesen.
+    /// </summary>
     public void StartWheel()
     {
         if (IsWheelRunning)
@@ -178,6 +206,9 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Stoppt das Einlesen des Lenkrads und setzt die lokalen Steuerzustaende auf neutral.
+    /// </summary>
     public void StopWheel()
     {
         var wasRunning = IsWheelRunning;
@@ -210,6 +241,9 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Oeffnet den COM-Port zur ESP32-Funkstation und startet Sende- und Empfangsloop.
+    /// </summary>
     public void ConnectEsp(string portName)
     {
         if (IsEspConnected)
@@ -253,6 +287,9 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Trennt die ESP32-Verbindung und beendet alle zugehoerigen Hintergrundtasks.
+    /// </summary>
     public void DisconnectEsp()
     {
         var wasConnected = IsEspConnected || _receiveTask is { IsCompleted: false };
@@ -288,12 +325,19 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Beendet alle laufenden Teilverbindungen der Steuerzentrale.
+    /// </summary>
     public void Stop()
     {
         DisconnectEsp();
         StopWheel();
     }
 
+    /// <summary>
+    /// Hochfrequenter Loop fuer das Lenkrad.
+    /// Er pollt DirectInput, aktualisiert die lokale Bedienlogik und legt das naechste Sendepaket bereit.
+    /// </summary>
     private void WheelLoop(CancellationToken cancellationToken)
     {
         var wheel = _wheel ?? throw new InvalidOperationException("Lenkrad nicht verbunden.");
@@ -324,6 +368,10 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Sendet die zuletzt berechneten Sollwerte mit konstanter Rate an den ESP32.
+    /// Der Loop ist von der Lenkradabfrage getrennt, damit bei kurzen Eingabejitter trotzdem gesendet wird.
+    /// </summary>
     private void SendLoop(CancellationToken cancellationToken)
     {
         var serial = _serialPort ?? throw new InvalidOperationException("Serial-Port nicht offen.");
@@ -360,6 +408,9 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Speichert die aktuellen Lenk-/Pedalwerte threadsicher fuer die UI.
+    /// </summary>
     private void SetTelemetry(TelemetrySnapshot telemetry)
     {
         lock (_telemetryLock)
@@ -368,6 +419,9 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Speichert die aktuell gedrueckten physischen Tasten fuer Diagnosezwecke.
+    /// </summary>
     private void SetRawInput(RawInputSnapshot rawInput)
     {
         lock (_rawInputLock)
@@ -376,6 +430,9 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Speichert die vom Fahrzeug bzw. ESP32 zurueckgemeldeten Telemetriedaten.
+    /// </summary>
     private void SetVehicleTelemetry(VehicleTelemetrySnapshot telemetry)
     {
         lock (_vehicleTelemetryLock)
@@ -384,6 +441,9 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Speichert Debugzaehler aus dem ESP32, falls der Debugmodus angezeigt wird.
+    /// </summary>
     private void SetDebugTelemetry(DebugTelemetrySnapshot telemetry)
     {
         lock (_debugTelemetryLock)
@@ -392,6 +452,9 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Legt das naechste Paket fuer den Sende-Thread ab.
+    /// </summary>
     private void SetOutboundSnapshot(OutboundSnapshot snapshot)
     {
         lock (_outboundLock)
@@ -400,6 +463,9 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Holt das aktuell freigegebene Sendepaket fuer den ESP32.
+    /// </summary>
     private OutboundSnapshot GetOutboundSnapshot()
     {
         lock (_outboundLock)
@@ -408,12 +474,19 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Aktualisiert den internen Statustext und informiert die UI.
+    /// </summary>
     private void EmitStatus(string message)
     {
         _statusText = message;
         StatusMessage?.Invoke(message);
     }
 
+    /// <summary>
+    /// Wandelt den rohen DirectInput-Zustand in fahrzeugnahe Werte und ein Steuerwort um.
+    /// Wenn updateOutbound aktiv ist, wird daraus direkt das naechste Sendepaket.
+    /// </summary>
     private void PublishWheelState(JoystickState state, bool updateOutbound)
     {
         var steeringRaw = DirectInputWheel.ReadAxis(state, SteeringAxis);
@@ -440,27 +513,42 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Begrenzung der Lenkachse auf den vereinbarten Wertebereich.
+    /// </summary>
     private static short ToArchiveSteering(int raw)
     {
         return (short)Math.Clamp(raw, AxisMinimum, AxisMaximum);
     }
 
+    /// <summary>
+    /// Wandelt die DirectInput-Gasachse in 0 bis 1000 um.
+    /// </summary>
     private static ushort ToArchiveGas(int raw)
     {
         return ToArchivePedal(raw);
     }
 
+    /// <summary>
+    /// Wandelt die DirectInput-Bremsachse in 0 bis 1000 um.
+    /// </summary>
     private static ushort ToArchiveBrake(int raw)
     {
         return ToArchivePedal(raw);
     }
 
+    /// <summary>
+    /// Pedale liefern je nach Geraet invertierte Achsen. Diese Funktion macht daraus 0 = losgelassen, 1000 = voll gedrueckt.
+    /// </summary>
     private static ushort ToArchivePedal(int raw)
     {
         var pedal = (1000 - raw) / 2;
         return (ushort)Math.Clamp(pedal, 0, 1000);
     }
 
+    /// <summary>
+    /// Setzt das lokale Gaslimit und speichert es im Benutzerprofil.
+    /// </summary>
     public void SetSpeedLimitPercent(int percent)
     {
         var clampedPercent = ClampSpeedLimitPercent(percent);
@@ -469,6 +557,9 @@ public sealed class SenderService : IDisposable
         SaveSpeedLimitPercent(clampedPercent);
     }
 
+    /// <summary>
+    /// Reduziert das Gas nur im Vorwaertsgang. Rueckwaerts und Neutral bleiben unveraendert.
+    /// </summary>
     private ushort ApplyDriveSpeedLimit(ushort gas, ushort buttons)
     {
         if ((buttons & (1 << LogicalDriveButton)) == 0)
@@ -486,11 +577,17 @@ public sealed class SenderService : IDisposable
         return (ushort)Math.Clamp(((int)gas * limit + 50) / 100, 0, 1000);
     }
 
+    /// <summary>
+    /// Begrenzung des Speedlimits auf den erlaubten Prozentbereich.
+    /// </summary>
     private static int ClampSpeedLimitPercent(int percent)
     {
         return Math.Clamp(percent, SpeedLimitMinimumPercent, SpeedLimitMaximumPercent);
     }
 
+    /// <summary>
+    /// Laedt das gespeicherte Speedlimit. Bei Fehlern wird der sichere Default verwendet.
+    /// </summary>
     private static int LoadSpeedLimitPercent()
     {
         try
@@ -509,6 +606,9 @@ public sealed class SenderService : IDisposable
         return SpeedLimitDefaultPercent;
     }
 
+    /// <summary>
+    /// Speichert das Speedlimit ausserhalb des Projektordners im lokalen Windows-Benutzerprofil.
+    /// </summary>
     private static void SaveSpeedLimitPercent(int percent)
     {
         try
@@ -527,6 +627,9 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Speicherort fuer die lokale Speedlimit-Einstellung.
+    /// </summary>
     private static string SpeedLimitSettingsPath =>
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -534,6 +637,9 @@ public sealed class SenderService : IDisposable
             "VehicleGroundStation",
             "speedlimit.txt");
 
+    /// <summary>
+    /// Setzt alle Bedienzustande auf Grundstellung und verhindert alte Tastenreste nach einem Neustart.
+    /// </summary>
     private void ResetControlState()
     {
         lock (_controlStateLock)
@@ -545,6 +651,10 @@ public sealed class SenderService : IDisposable
         SetOutboundSnapshot(OutboundSnapshot.Neutral);
     }
 
+    /// <summary>
+    /// Herzstueck der Bedienlogik: Aus physischen Tasten werden stabile logische Fahrzeugzustaende.
+    /// Flanken werden ausgewertet, damit ein Tastendruck nur einmal schaltet.
+    /// </summary>
     private ushort BuildLogicalButtons(JoystickState state)
     {
         lock (_controlStateLock)
@@ -585,11 +695,13 @@ public sealed class SenderService : IDisposable
             var l1Falling = !l1Pressed && _localControlState.PrevL1Pressed;
             var psRising = psPressed && !_localControlState.PrevPsPressed;
 
+            // R1 setzt die Frontkamera direkt wieder in Mittelstellung.
             if (r1Rising)
             {
                 _localControlState.CameraPanAngleDeg = 0;
             }
 
+            // L1 hat zwei Funktionen: kurzer Druck schaltet Licht, langer Druck startet die Lichthupe.
             if (l1Rising)
             {
                 _localControlState.L1PressedTicks = nowTicks;
@@ -615,6 +727,7 @@ public sealed class SenderService : IDisposable
                 _localControlState.L1LongPressHandled = false;
             }
 
+            // Fahrstufe wird lokal verwaltet. Der STM32 bekommt nur den fertigen Zustand.
             if (psRising)
             {
                 _localControlState.Gear = 'N';
@@ -631,16 +744,19 @@ public sealed class SenderService : IDisposable
 
             _localControlState.NeutralUnlocked = false;
 
+            // Fahrmodus wird als Toggle behandelt.
             if (l2Rising)
             {
                 _localControlState.SportMode = !_localControlState.SportMode;
             }
 
+            // Kameraumschaltung vorne/hinten.
             if (r2Rising)
             {
                 _localControlState.CameraRearActive = !_localControlState.CameraRearActive;
             }
 
+            // Kameraschwenk arbeitet in festen 45-Grad-Schritten.
             if (cameraMinusRising)
             {
                 _localControlState.CameraPanAngleDeg = ClampCameraAngle(_localControlState.CameraPanAngleDeg - CameraAngleStepDeg);
@@ -653,6 +769,7 @@ public sealed class SenderService : IDisposable
                 _localControlState.LastCameraPlusTicks = nowTicks;
             }
 
+            // Differentialsperren werden mit getrennten Lock-/Unlock-Tasten gesetzt.
             if (frontDiffLockRising)
             {
                 _localControlState.FrontDiffLocked = true;
@@ -697,6 +814,7 @@ public sealed class SenderService : IDisposable
             _localControlState.PrevR1Pressed = r1Pressed;
             _localControlState.PrevPsPressed = psPressed;
 
+            // Ab hier wird der lokale Zustand in das 16-Bit-Steuerwort codiert.
             ushort buttons = 0;
 
             if (_localControlState.Gear == 'R')
@@ -756,17 +874,26 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Liest eine physische Taste robust aus dem DirectInput-Array.
+    /// </summary>
     private static bool IsPhysicalButtonPressed(JoystickState state, int index)
     {
         var buttons = state.Buttons;
         return (index >= 0) && (index < buttons.Length) && buttons[index];
     }
 
+    /// <summary>
+    /// Begrenzt den Kamerawinkel auf den mechanisch vorgesehenen Bereich.
+    /// </summary>
     private static int ClampCameraAngle(int angleDeg)
     {
         return Math.Clamp(angleDeg, CameraAngleMinimumDeg, CameraAngleMaximumDeg);
     }
 
+    /// <summary>
+    /// Codiert den Kamerawinkel in ein kleines Symbol im Steuerwort.
+    /// </summary>
     private static ushort EncodeCameraAngle(int angleDeg)
     {
         var clampedAngle = ClampCameraAngle(angleDeg);
@@ -775,6 +902,9 @@ public sealed class SenderService : IDisposable
         return (ushort)(angleCode << CameraAngleCodeShift);
     }
 
+    /// <summary>
+    /// Prueft, ob seit dem letzten Tastendruck genug Zeit vergangen ist.
+    /// </summary>
     private static bool DebounceElapsed(long nowTicks, long lastTicks, int debounceMs)
     {
         if (lastTicks <= 0)
@@ -786,6 +916,9 @@ public sealed class SenderService : IDisposable
         return elapsedMs >= debounceMs;
     }
 
+    /// <summary>
+    /// Prueft, ob eine Taste lang genug gehalten wurde.
+    /// </summary>
     private static bool PressElapsed(long nowTicks, long pressedTicks, int elapsedMsThreshold)
     {
         if (pressedTicks <= 0)
@@ -797,6 +930,9 @@ public sealed class SenderService : IDisposable
         return elapsedMs >= elapsedMsThreshold;
     }
 
+    /// <summary>
+    /// Erzeugt das zeitliche Muster der Lichthupe: ein, aus, ein, fertig.
+    /// </summary>
     private static bool GetFlashSequenceActive(long nowTicks, long startTicks, out bool finished)
     {
         finished = false;
@@ -830,6 +966,9 @@ public sealed class SenderService : IDisposable
         return false;
     }
 
+    /// <summary>
+    /// Wartet bis zum naechsten Sollzeitpunkt. Grobe Wartezeit wird geschlafen, die letzten Millisekunden werden aktiv gehalten.
+    /// </summary>
     private static void WaitUntil(Stopwatch stopwatch, long targetTicks, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
@@ -853,6 +992,9 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Liest den Rueckkanal vom ESP32. Binaere Statuspakete und Debug-Text laufen ueber denselben COM-Port.
+    /// </summary>
     private void ReceiveLoop(CancellationToken cancellationToken)
     {
         var serial = _serialPort ?? throw new InvalidOperationException("Serial-Port nicht offen.");
@@ -875,6 +1017,7 @@ public sealed class SenderService : IDisposable
                     continue;
                 }
 
+                // Kleiner Zustandsautomat: erst Header 0x5A 0xA5 suchen, danach festes Paket sammeln.
                 switch (state)
                 {
                     case 0:
@@ -937,6 +1080,9 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Prueft und dekodiert das 20-Byte-Statuspaket des ESP32.
+    /// </summary>
     private static bool TryParseVehicleTelemetry(byte[] packet, out VehicleTelemetrySnapshot telemetry)
     {
         byte checksum = 0;
@@ -995,6 +1141,9 @@ public sealed class SenderService : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Wandelt den codierten Kamerawinkel wieder in Grad um.
+    /// </summary>
     private static int DecodeCameraAngle(int angleCode)
     {
         return angleCode is >= 1 and <= CameraAngleMaximumCode
@@ -1002,6 +1151,9 @@ public sealed class SenderService : IDisposable
             : 0;
     }
 
+    /// <summary>
+    /// Sammelt lesbare Debug-Zeilen, ohne den binaeren Paketparser zu stoeren.
+    /// </summary>
     private void ConsumeDebugByte(byte value, StringBuilder buffer)
     {
         if (value == (byte)'\n')
@@ -1035,6 +1187,9 @@ public sealed class SenderService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Dekodiert Debugzeilen des ESP32 im Format "!dbg key=value ...".
+    /// </summary>
     private static bool TryParseDebugTelemetry(string line, out DebugTelemetrySnapshot telemetry)
     {
         telemetry = DebugTelemetrySnapshot.Empty;
@@ -1076,21 +1231,33 @@ public sealed class SenderService : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Liest einen unsigned Debugwert aus dem Key-Value-Dictionary.
+    /// </summary>
     private static uint ParseUInt(Dictionary<string, string> values, string key)
     {
         return values.TryGetValue(key, out var text) && uint.TryParse(text, out var value) ? value : 0U;
     }
 
+    /// <summary>
+    /// Liest einen signed Debugwert aus dem Key-Value-Dictionary.
+    /// </summary>
     private static short ParseInt(Dictionary<string, string> values, string key)
     {
         return values.TryGetValue(key, out var text) && short.TryParse(text, out var value) ? value : (short)0;
     }
 
+    /// <summary>
+    /// Gibt alle Ressourcen frei und stoppt laufende Hintergrundthreads.
+    /// </summary>
     public void Dispose()
     {
         Stop();
     }
 
+    /// <summary>
+    /// Momentaufnahme der lokalen Lenkrad- und Pedalwerte fuer die UI.
+    /// </summary>
     public readonly record struct TelemetrySnapshot(
         short Steering,
         ushort Gas,
@@ -1102,11 +1269,17 @@ public sealed class SenderService : IDisposable
         public static readonly TelemetrySnapshot Empty = new(0, 0, 0, 0, 0, 0);
     }
 
+    /// <summary>
+    /// Momentaufnahme der gedrueckten physischen Tasten.
+    /// </summary>
     public readonly record struct RawInputSnapshot(string PressedButtons)
     {
         public static readonly RawInputSnapshot Empty = new("-");
     }
 
+    /// <summary>
+    /// Vereinfachte Telemetrie, die der ESP32 aus CRSF-Rueckkanal und Debugdaten bildet.
+    /// </summary>
     public readonly record struct VehicleTelemetrySnapshot(
         bool LinkActive,
         bool VehicleStatusValid,
@@ -1132,6 +1305,9 @@ public sealed class SenderService : IDisposable
         public static readonly VehicleTelemetrySnapshot Empty = new(false, false, '-', false, false, false, 0, false, false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
 
+    /// <summary>
+    /// Diagnosewerte aus den Debugzeilen des ESP32.
+    /// </summary>
     public readonly record struct DebugTelemetrySnapshot(
         uint HostPackets,
         uint RxBytes,
@@ -1151,6 +1327,10 @@ public sealed class SenderService : IDisposable
         public static readonly DebugTelemetrySnapshot Empty = new(0, 0, 0, 0, 0, 0, 0, 0, "00", false, '-', 0, 0, 0);
     }
 
+    /// <summary>
+    /// Lokal berechneter Bedienzustand der Steuerzentrale.
+    /// Diese Werte sind die SSOT fuer die Anzeige.
+    /// </summary>
     public readonly record struct ControlStateSnapshot(
         char Gear,
         bool NeutralUnlocked,
@@ -1165,6 +1345,9 @@ public sealed class SenderService : IDisposable
         public static readonly ControlStateSnapshot Default = new('N', false, false, false, 0, false, false, false, false);
     }
 
+    /// <summary>
+    /// Fertiger Datensatz, der zyklisch zum ESP32 gesendet wird.
+    /// </summary>
     private readonly record struct OutboundSnapshot(
         short Steering,
         ushort Gas,
@@ -1174,6 +1357,9 @@ public sealed class SenderService : IDisposable
         public static readonly OutboundSnapshot Neutral = new(0, 0, 0, NeutralControlWord);
     }
 
+    /// <summary>
+    /// Interner Speicher der Zustandsmaschine fuer Tastenflanken, Toggles und Zeitfunktionen.
+    /// </summary>
     private sealed class LocalControlState
     {
         public char Gear { get; set; } = 'N';

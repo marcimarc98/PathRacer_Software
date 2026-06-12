@@ -2,6 +2,10 @@ using SharpDX.DirectInput;
 
 namespace LenkradSenderApp;
 
+/// <summary>
+/// Kapselt den Zugriff auf das PC-Lenkrad ueber DirectInput.
+/// Die Klasse normalisiert alle Achsen auf -1000 bis +1000 und liefert Rohdaten an den SenderService.
+/// </summary>
 public sealed class DirectInputWheel : IDisposable
 {
     private readonly DirectInput _directInput;
@@ -9,6 +13,10 @@ public sealed class DirectInputWheel : IDisposable
 
     public string DeviceName { get; }
 
+    /// <summary>
+    /// Sucht ein angeschlossenes Gamecontroller-/Lenkradgeraet und verbindet es.
+    /// Thrustmaster-Geraete werden bevorzugt, damit das T80 automatisch zuerst verwendet wird.
+    /// </summary>
     public DirectInputWheel()
     {
         _directInput = new DirectInput();
@@ -28,10 +36,12 @@ public sealed class DirectInputWheel : IDisposable
         {
             try
             {
+                // Ein einheitlicher Wertebereich vereinfacht spaeter die Umrechnung in RC-Werte.
                 _joystick.GetObjectPropertiesById(objectInstance.ObjectId).Range = new InputRange(-1000, 1000);
             }
             catch
             {
+                // Einige DirectInput-Objekte erlauben keine Range-Aenderung. Diese werden ignoriert.
             }
         }
 
@@ -39,6 +49,9 @@ public sealed class DirectInputWheel : IDisposable
         _joystick.Acquire();
     }
 
+    /// <summary>
+    /// Listet angeschlossene DirectInput-Gamecontroller auf und sortiert bekannte Thrustmaster-Geraete nach vorne.
+    /// </summary>
     private static List<DeviceInstance> GetAvailableDevices(DirectInput directInput)
     {
         return directInput
@@ -48,11 +61,17 @@ public sealed class DirectInputWheel : IDisposable
             .ToList();
     }
 
+    /// <summary>
+    /// Liefert die Namen der bekannten Achsen fuer UI- oder Diagnosezwecke.
+    /// </summary>
     public string[] GetAvailableAxisNames()
     {
         return Enum.GetNames<WheelAxis>();
     }
 
+    /// <summary>
+    /// Liest den aktuellen Lenkradzustand. Bei einem kurzen Verbindungsproblem wird neu acquiriert.
+    /// </summary>
     public JoystickState Poll()
     {
         try
@@ -69,6 +88,10 @@ public sealed class DirectInputWheel : IDisposable
         }
     }
 
+    /// <summary>
+    /// Holt aus einem DirectInput-Zustand die gewuenschte Achse.
+    /// Fehlende Slider werden als 0 behandelt.
+    /// </summary>
     public static int ReadAxis(JoystickState state, WheelAxis axis)
     {
         return axis switch
@@ -85,6 +108,9 @@ public sealed class DirectInputWheel : IDisposable
         };
     }
 
+    /// <summary>
+    /// Gibt das DirectInput-Geraet frei, damit Windows es wieder normal verwalten kann.
+    /// </summary>
     public void Dispose()
     {
         _joystick.Unacquire();

@@ -15,6 +15,7 @@ static uint8_t s_frame[CRSF_MAX_FRAME_SIZE];
 static uint8_t s_frame_idx = 0U;
 static uint8_t s_expected_total = 0U;
 
+/* Berechnet die CRSF-CRC8-Pruefsumme mit Polynom 0xD5. */
 static uint8_t crc8(const uint8_t* ptr, uint8_t len)
 {
   uint8_t crc = 0U;
@@ -32,6 +33,7 @@ static uint8_t crc8(const uint8_t* ptr, uint8_t len)
   return crc;
 }
 
+/* Prueft, ob ein Byte als CRSF-Start-/Adressbyte verwendet werden kann. */
 static bool is_valid_sync_byte(uint8_t value)
 {
   switch (value)
@@ -47,6 +49,7 @@ static bool is_valid_sync_byte(uint8_t value)
   }
 }
 
+/* Entpackt einen 11-Bit-Kanalwert aus dem 22-Byte-RC-Payload. */
 static uint16_t unpack11(const uint8_t* payload, uint32_t channel)
 {
   const uint32_t bit_index = channel * 11U;
@@ -67,12 +70,14 @@ static uint16_t unpack11(const uint8_t* payload, uint32_t channel)
   return (uint16_t)((word >> shift) & 0x07FFU);
 }
 
+/* Setzt den Byteparser zurueck, wenn ein Rahmen vollstaendig oder ungueltig ist. */
 static void reset_frame_parser(void)
 {
   s_frame_idx = 0U;
   s_expected_total = 0U;
 }
 
+/* Prueft einen vollstaendigen CRSF-Rahmen und uebergibt gueltige RC-Kanaele an rc_state. */
 static void process_frame(const uint8_t* frame)
 {
   const uint8_t length = frame[1];
@@ -100,6 +105,9 @@ static void process_frame(const uint8_t* frame)
   rc_state_update_from_channels(channels, HAL_GetTick());
 }
 
+/* Byteweiser CRSF-Parser fuer den UART-Interrupt.
+ * Er synchronisiert auf Startbyte, liest die Laenge und sammelt bis zum vollstaendigen Rahmen.
+ */
 static void process_crsf_byte(uint8_t value)
 {
   if (s_frame_idx == 0U)
@@ -157,6 +165,7 @@ static void process_crsf_byte(uint8_t value)
   }
 }
 
+/* Initialisiert USART1 fuer CRSF-Empfang und aktiviert die RX-/Fehlerinterrupts. */
 void crsf_receiver_init(void)
 {
   s_crsf_uart.Instance = USART1;
@@ -182,6 +191,7 @@ void crsf_receiver_init(void)
   __HAL_UART_ENABLE_IT(&s_crsf_uart, UART_IT_PE);
 }
 
+/* Sendet einen CRSF-Telemetrierahmen zurueck in Richtung Empfaenger/Funkstrecke. */
 bool crsf_receiver_send_frame(const uint8_t* frame, uint8_t length)
 {
   if ((frame == 0) || (length == 0U))
@@ -192,6 +202,7 @@ bool crsf_receiver_send_frame(const uint8_t* frame, uint8_t length)
   return HAL_UART_Transmit(&s_crsf_uart, (uint8_t*)frame, length, 10U) == HAL_OK;
 }
 
+/* Interrupt-Service-Einstieg fuer neue UART-Bytes und UART-Fehler. */
 void crsf_receiver_irq_handler(void)
 {
   uint32_t isr = s_crsf_uart.Instance->ISR;

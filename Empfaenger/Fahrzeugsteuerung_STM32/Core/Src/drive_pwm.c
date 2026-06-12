@@ -24,6 +24,7 @@ static int s_camera_pan_angle_deg = 0;
 static bool s_diff_front_locked = false;
 static bool s_diff_rear_locked = false;
 
+/* Begrenzt Servo- und ESC-Pulsweiten auf den normalen RC-Bereich. */
 static int clamp_us(int pulse_us)
 {
   if (pulse_us < 1000)
@@ -39,6 +40,7 @@ static int clamp_us(int pulse_us)
   return pulse_us;
 }
 
+/* Begrenzt den Kameraschwenk auf den mechanisch vorgesehenen Winkelbereich. */
 static int clamp_camera_angle_deg(int angle_deg)
 {
   if (angle_deg < CAMERA_PAN_MIN_DEG)
@@ -54,17 +56,22 @@ static int clamp_camera_angle_deg(int angle_deg)
   return angle_deg;
 }
 
+/* Wandelt Kamerawinkel in eine Servo-Pulsweite um. */
 static uint32_t camera_angle_to_us(int angle_deg)
 {
   const int clamped_angle_deg = clamp_camera_angle_deg(angle_deg);
   return (uint32_t)(CAMERA_PAN_CENTER_US - ((clamped_angle_deg * CAMERA_PAN_RANGE_US) / CAMERA_PAN_MAX_DEG));
 }
 
+/* Wandelt den logischen Sperrzustand in eine Servo-Pulsweite fuer das Diff-Servo. */
 static uint32_t diff_state_to_us(bool locked)
 {
   return locked ? DIFF_LOCKED_US : DIFF_UNLOCKED_US;
 }
 
+/* Ermittelt die effektive Timerfrequenz auf APB1.
+ * Bei STM32-Timern verdoppelt sich die Timerfrequenz, wenn der APB-Prescaler nicht 1 ist.
+ */
 static uint32_t get_apb_timer_clock_hz(void)
 {
   const uint32_t pclk1_hz = HAL_RCC_GetPCLK1Freq();
@@ -78,6 +85,7 @@ static uint32_t get_apb_timer_clock_hz(void)
   return pclk1_hz * 2U;
 }
 
+/* Ermittelt die effektive Timerfrequenz auf APB2. */
 static uint32_t get_apb2_timer_clock_hz(void)
 {
   const uint32_t pclk2_hz = HAL_RCC_GetPCLK2Freq();
@@ -91,18 +99,21 @@ static uint32_t get_apb2_timer_clock_hz(void)
   return pclk2_hz * 2U;
 }
 
+/* Schaltet zwischen Front- und Heckkamera um. */
 static void write_camera_pwm_output(bool camera_rear_active)
 {
   s_camera_rear_active = camera_rear_active;
   CAMERA_SWITCH_PWM_CHANNEL_COMPARE = camera_rear_active ? CAMERA_SWITCH_REAR_US : CAMERA_SWITCH_FRONT_US;
 }
 
+/* Setzt den Schwenkwinkel der Frontkamera. */
 static void write_camera_pan_pwm_output(int camera_pan_angle_deg)
 {
   s_camera_pan_angle_deg = clamp_camera_angle_deg(camera_pan_angle_deg);
   CAMERA_PAN_PWM_CHANNEL_COMPARE = camera_angle_to_us(s_camera_pan_angle_deg);
 }
 
+/* Setzt die PWM-Signale fuer vordere und hintere Differentialsperre. */
 static void write_diff_pwm_outputs(bool diff_front_locked, bool diff_rear_locked)
 {
   s_diff_front_locked = diff_front_locked;
@@ -111,6 +122,7 @@ static void write_diff_pwm_outputs(bool diff_front_locked, bool diff_rear_locked
   DIFF_REAR_PWM_CHANNEL_COMPARE = diff_state_to_us(s_diff_rear_locked);
 }
 
+/* Schreibt alle PWM-Ausgaenge gebuendelt, damit ein Zyklus konsistent bleibt. */
 static void write_pwm_outputs(
     int servo_us,
     int esc_us,
@@ -126,6 +138,7 @@ static void write_pwm_outputs(
   write_diff_pwm_outputs(diff_front_locked, diff_rear_locked);
 }
 
+/* Initialisiert GPIOs und Timer fuer 50-Hz-Servo-/ESC-PWM mit 1-us-Aufloesung. */
 void drive_pwm_init(void)
 {
   GPIO_InitTypeDef gpio_tim3 = {0};
@@ -217,6 +230,7 @@ void drive_pwm_init(void)
   write_pwm_outputs(1500, 1500, false, 0, false, false);
 }
 
+/* Gibt die berechneten Fahrzeugbefehle auf Servo, ESC, Kamera und Diffservos aus. */
 void drive_pwm_apply(
     int servo_us,
     int esc_us,
@@ -228,6 +242,7 @@ void drive_pwm_apply(
   write_pwm_outputs(servo_us, esc_us, camera_rear_active, camera_pan_angle_deg, diff_front_locked, diff_rear_locked);
 }
 
+/* Failsafe: Antrieb und Lenkung neutral, Zusatzfunktionen bleiben im zuletzt bekannten Zustand. */
 void drive_pwm_apply_failsafe(void)
 {
   write_pwm_outputs(

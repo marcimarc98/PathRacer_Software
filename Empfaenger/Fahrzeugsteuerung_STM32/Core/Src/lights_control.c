@@ -11,6 +11,7 @@
 #define REAR_LIGHT_PWM_PERIOD_MS       10U
 #define REAR_LIGHT_PWM_OFF_DUTY_MS     3U
 
+/* Liest ein logisches Tastenbit aus dem RC-Zustand. */
 static bool rc_button_is_pressed(const rc_state_t* rc_state, uint32_t index)
 {
   if ((rc_state == 0) || (index >= RC_STATE_NUM_BUTTONS))
@@ -21,6 +22,7 @@ static bool rc_button_is_pressed(const rc_state_t* rc_state, uint32_t index)
   return rc_state->knopf[index];
 }
 
+/* Erkennt Bremsen mit kleiner Deadband gegen Pedalrauschen. */
 static bool brake_is_active(const rc_state_t* rc_state)
 {
   if (rc_state == 0)
@@ -31,6 +33,7 @@ static bool brake_is_active(const rc_state_t* rc_state)
   return rc_state->bremse_us > (1000 + BRAKE_LIGHT_ACTIVE_DEADBAND_US);
 }
 
+/* Erkennt eine starke Bremsung fuer adaptives Blinkbremslicht. */
 static bool brake_is_full_active(const rc_state_t* rc_state)
 {
   if (rc_state == 0)
@@ -41,6 +44,9 @@ static bool brake_is_full_active(const rc_state_t* rc_state)
   return rc_state->bremse_us >= BRAKE_FULL_ACTIVE_THRESHOLD_US;
 }
 
+/* Berechnet den Ruecklichtausgang.
+ * Ruecklicht wird per einfacher Software-PWM gedimmt, Bremslicht wird voll eingeschaltet.
+ */
 static bool rear_light_pwm_output_for_now(
     uint32_t now_ms,
     bool tail_light_on,
@@ -78,6 +84,7 @@ static bool rear_light_pwm_output_for_now(
   return (now_ms % REAR_LIGHT_PWM_PERIOD_MS) < REAR_LIGHT_PWM_OFF_DUTY_MS;
 }
 
+/* Schreibt die Lichtausgaenge auf die GPIO-Pins. */
 static void set_light_outputs(bool front_light_on, bool rear_light_output_on)
 {
   HAL_GPIO_WritePin(LIGHT_MAIN_GPIO_Port, LIGHT_MAIN_Pin, front_light_on ? GPIO_PIN_SET : GPIO_PIN_RESET);
@@ -87,6 +94,7 @@ static void set_light_outputs(bool front_light_on, bool rear_light_output_on)
 static bool s_rear_light_hold_active = false;
 static uint32_t s_rear_light_last_brake_ms = 0U;
 
+/* Initialisiert die Licht-GPIOs. */
 void lights_control_init(void)
 {
   GPIO_InitTypeDef gpio = {0};
@@ -102,6 +110,7 @@ void lights_control_init(void)
   set_light_outputs(false, false);
 }
 
+/* Schaltet bei Signalverlust alle Lichter aus und setzt Haltezeiten zurueck. */
 void lights_control_on_signal_lost(void)
 {
   s_rear_light_hold_active = false;
@@ -109,6 +118,7 @@ void lights_control_on_signal_lost(void)
   set_light_outputs(false, false);
 }
 
+/* Aktualisiert Hauptlicht, Lichthupe, Ruecklicht und Bremslicht aus dem RC-Zustand. */
 void lights_control_step(const rc_state_t* rc_state, uint32_t now_ms, lights_control_output_t* out_state)
 {
   const bool flash_active = rc_button_is_pressed(rc_state, BUTTON_FLASH_ACTIVE);

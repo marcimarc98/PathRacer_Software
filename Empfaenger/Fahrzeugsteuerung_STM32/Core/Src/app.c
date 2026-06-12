@@ -10,6 +10,9 @@
 
 #define RC_SIGNAL_TIMEOUT_MS 500U
 
+/* Zentraler Ablauf des Fahrzeugcontrollers:
+ * CRSF-Zustand lesen, Sensoren aktualisieren, Ausgaenge setzen und Telemetrie erzeugen.
+ */
 static void app_run_control_cycle(void)
 {
   const uint32_t now_ms = HAL_GetTick();
@@ -23,6 +26,9 @@ static void app_run_control_cycle(void)
   sensor_data_sample();
   sensor_data_get_status(&sensor_status);
 
+  /* Nur mit aktuellem RC-Signal werden Fahr- und Lichtbefehle umgesetzt.
+   * Bei Timeout geht das Fahrzeug in Failsafe.
+   */
   if (rc_state_signal_is_recent(&rc_state, now_ms, RC_SIGNAL_TIMEOUT_MS))
   {
     lights_control_step(&rc_state, now_ms, &lights_state);
@@ -52,6 +58,7 @@ static void app_run_control_cycle(void)
   crsf_telemetry_process(now_ms, &telemetry_status);
 }
 
+/* Initialisiert alle Projektmodule in der Reihenfolge Daten, Logik, Ausgaenge, Funk. */
 void app_init(void)
 {
   rc_state_init();
@@ -64,11 +71,13 @@ void app_init(void)
   app_run_control_cycle();
 }
 
+/* Wird aus main() fortlaufend aufgerufen und fuehrt einen kompletten Regelzyklus aus. */
 void app_loop(void)
 {
   app_run_control_cycle();
 }
 
+/* Weiterleitung des USART-Interrupts an den CRSF-Parser. */
 void app_uart_irq_handler(void)
 {
   crsf_receiver_irq_handler();

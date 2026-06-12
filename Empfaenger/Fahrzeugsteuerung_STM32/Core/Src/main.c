@@ -4,6 +4,9 @@
 
 static void SystemClock_Config(void);
 
+/* Einstiegspunkt des STM32.
+ * Nach HAL- und Taktinitialisierung laeuft die komplette Projektlogik in app_loop().
+ */
 int main(void)
 {
   HAL_Init();
@@ -17,6 +20,9 @@ int main(void)
   }
 }
 
+/* Konfiguriert den Systemtakt aus HSI und PLL.
+ * Diese Einstellung bestimmt auch die Timerbasis fuer PWM und UART.
+ */
 static void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef osc = {0};
@@ -47,6 +53,7 @@ static void SystemClock_Config(void)
   }
 }
 
+/* Zentraler Fehlerzustand: Interrupts aus, Controller bleibt stehen. */
 void Error_Handler(void)
 {
   __disable_irq();
@@ -57,6 +64,7 @@ void Error_Handler(void)
 }
 
 #ifdef USE_FULL_ASSERT
+/* Assert-Hook fuer HAL-Debugbuilds. */
 void assert_failed(uint8_t* file, uint32_t line)
 {
   (void)file;
